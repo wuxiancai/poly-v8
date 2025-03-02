@@ -1479,7 +1479,7 @@ class CryptoTrader:
                     if self.driver:
                             
                         self.driver.refresh()
-                        self.logger.info("定时刷新成功")
+                        self.logger.info("✅定时刷新成功")
                     else:
                         self.logger.error("refresh_page浏览器连接丢失")
                 else:
