@@ -824,7 +824,7 @@ class CryptoTrader:
         threading.Timer(20, safe_start, args=(self.saturday_auto_update_weekly_url,)).start()
         threading.Timer(25, safe_start, args=(self.auto_find_54_coin,)).start() 
         self.first_refresh = True 
-        threading.Timer(120, safe_start, args=(self.refresh_page,)).start()
+        threading.Timer(60, safe_start, args=(self.refresh_page,)).start()
     
     """以下代码是:threading.Thread(target=self._start_browser_monitoring, 
     args=(self.target_url,), daemon=True).start()线程启动后执行的函数,直到 995 行"""
@@ -1247,7 +1247,7 @@ class CryptoTrader:
                 return
 
             self.is_url_monitoring = True
-            self.logger.info("🔄 启动URL监控...")
+            self.logger.info("✅ 启动URL监控")
 
             def _monitor():
                 try:
@@ -1297,7 +1297,7 @@ class CryptoTrader:
                 
                 # 更新状态标志
                 self.is_url_monitoring = False
-                self.logger.info("✅ URL监控已完全停止")
+                self.logger.info("❌ URL监控已完全停止")
                 
             except Exception as e:
                 self.logger.error(f"停止监控时发生未知错误: {str(e)}")
@@ -1385,6 +1385,8 @@ class CryptoTrader:
             
             # 等待弹窗自动关闭
             time.sleep(0.3)
+
+            #再次检查是否登录成功
             try:
                 login_button = self.driver.find_element(By.XPATH, XPathConfig.LOGIN_BUTTON)
             except Exception as e:
@@ -1399,8 +1401,8 @@ class CryptoTrader:
                 self.logger.warning("检测到未登录状态，执行自动登录...")
                 self.check_and_handle_login()
             else:
-                    # 正常状态无需记录日志
-                    pass
+                # 正常状态无需记录日志
+                pass
             
             try:
                 cash_element = self.driver.find_element(By.XPATH, XPathConfig.CASH_VALUE)
@@ -1470,8 +1472,7 @@ class CryptoTrader:
                 # 检查是否是第一次执行
                 if hasattr(self, 'first_refresh') and self.first_refresh:
                     self.first_refresh = False
-                    
-                    self.refresh_timer = self.root.after(120000, self.refresh_page)  # 120秒 = 120000毫秒
+                    #self.refresh_timer = self.root.after(120000, self.refresh_page)  # 120秒 = 120000毫秒
                     return
                 
                 if not self.trading:  # 仅在非交易状态执行刷新
@@ -1509,7 +1510,7 @@ class CryptoTrader:
             # 尝试取消定时器
             try:
                 self.root.after_cancel(self.refresh_timer)
-                self.logger.info(f"✅ 成功停止页面刷新定时器 ID: {timer_id}")
+                self.logger.info("❌ 成功停止页面刷新定时器")
             except ValueError as e:
                 if "invalid timer id" in str(e).lower():
                     self.logger.warning("遇到无效定时器ID，可能已被触发或取消")
