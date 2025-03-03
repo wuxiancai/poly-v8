@@ -3545,9 +3545,9 @@ class CryptoTrader:
                                             self._start_browser_monitoring(self.target_url)
                                             break  # 中断循环，避免继续出错
                             
-                                # 等待 10 分钟后重复找币
-                                threading.Timer(600, self.auto_find_54_coin).start()
-                                self.logger.info("等待10分钟后重复找币")
+                                # 等待 5 分钟后重复找币
+                                threading.Timer(300, self.auto_find_54_coin).start()
+                                self.logger.info("等待5分钟后重复找币")
 
                             except Exception as e:
                                 self.logger.error(f"自动找币异常: {str(e)}")
