@@ -1497,7 +1497,7 @@ class CryptoTrader:
                     if self.driver:
                             
                         self.driver.refresh()
-                        self.logger.info("✅定时刷新成功")
+                        self.logger.info("✅ 定时刷新成功")
                     else:
                         self.logger.error("refresh_page浏览器连接丢失")
                 else:
@@ -3512,7 +3512,7 @@ class CryptoTrader:
                                                 # 保存当前 URL 到 config
                                                 self.config['website']['url'] = coin_new_weekly_url
                                                 self.save_config()
-                                                self.logger.info(f"{coin}: YES{int(yes_price)}¢|NO{int(no_price)}¢ 符合要求,已保存到 config")
+                                                self.logger.info(f"{coin}: YES{int(yes_price)}¢|NO{int(no_price)}¢ ✅ 符合要求,已保存到 config")
                                                 # 关闭当前页面
                                                 self.driver.close()
                                                 # 切换回原始窗口
@@ -3520,7 +3520,7 @@ class CryptoTrader:
                                                 # 重启程序
                                                 self.restart_program()
                                             else:
-                                                self.logger.info(f"{coin}: YES{int(yes_price)}¢|NO{int(no_price)}¢ 不符合要求")
+                                                self.logger.info(f"{coin}: YES{int(yes_price)}¢|NO{int(no_price)}¢ ❌ 不符合要求")
                                                 # 关闭当前页面
                                                 self.driver.close()
                                                 # 切换回原始窗口
