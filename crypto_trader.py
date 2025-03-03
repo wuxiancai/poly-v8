@@ -1580,7 +1580,7 @@ class CryptoTrader:
                 no1_target = float(self.no1_price_entry.get())
                 
                 # 检查Yes1价格匹配
-                if 0 <= (yes_price - yes1_target ) <= 0.05 and yes1_target > 0:
+                if 0 <= (yes_price - yes1_target ) <= 0.04 and yes1_target > 0:
                     while True:
                         self.logger.info("Yes 1价格匹配,执行自动交易")
                         # 执行现有的交易操作
@@ -1629,7 +1629,7 @@ class CryptoTrader:
                             time.sleep(2)  # 添加延时避免过于频繁的重试
 
                 # 检查No1价格匹配
-                elif 0 <= (no_price - no1_target ) <= 0.05 and no1_target > 0:
+                elif 0 <= (no_price - no1_target ) <= 0.04 and no1_target > 0:
                     while True:
                         self.logger.info("No 1价格匹配,执行自动交易") 
                         # 执行现有的交易操作
@@ -1725,7 +1725,7 @@ class CryptoTrader:
                 no2_target = float(self.no2_price_entry.get())
                 
                 # 检查Yes2价格匹配
-                if 0 <= (yes_price - yes2_target ) <= 0.05 and yes2_target > 0:
+                if 0 <= (yes_price - yes2_target ) <= 0.04 and yes2_target > 0:
                     while True:
                         self.logger.info("Yes 2价格匹配,执行自动交易")
                         # 执行现有的交易操作
@@ -1766,7 +1766,7 @@ class CryptoTrader:
                             time.sleep(2)  # 添加延时避免过于频繁的重试
 
                 # 检查No2价格匹配
-                elif 0 <= (no_price - no2_target ) <= 0.05 and no2_target > 0:
+                elif 0 <= (no_price - no2_target ) <= 0.04 and no2_target > 0:
                     while True:
                         self.logger.info("No 2价格匹配,执行自动交易")
                         
@@ -1854,7 +1854,7 @@ class CryptoTrader:
                 no3_target = float(self.no3_price_entry.get())
                 
                 # 检查Yes3价格匹配
-                if 0 <= (yes_price - yes3_target ) <= 0.05 and yes3_target > 0:
+                if 0 <= (yes_price - yes3_target ) <= 0.04 and yes3_target > 0:
                     while True:
                         self.logger.info("Yes 3价格匹配,执行自动交易")
                         # 执行交易操作
@@ -1894,7 +1894,7 @@ class CryptoTrader:
                             self.logger.warning("交易失败,等待2秒后重试")
                             time.sleep(2)  # 添加延时避免过于频繁的重试
                 # 检查No3价格匹配
-                elif 0 <= (no_price - no3_target ) <= 0.05 and no3_target > 0:
+                elif 0 <= (no_price - no3_target ) <= 0.04 and no3_target > 0:
                     while True:
                         self.logger.info("No 3价格匹配,执行自动交易")
                         # 执行交易操作
@@ -1981,7 +1981,7 @@ class CryptoTrader:
                 no4_target = float(self.no4_price_entry.get())
                 
                 # 检查Yes4价格匹配
-                if 0 <= (yes_price - yes4_target ) <= 0.05 and yes4_target > 0:
+                if 0 <= (yes_price - yes4_target ) <= 0.04 and yes4_target > 0:
                     while True:
                         self.logger.info("Yes 4价格匹配,执行自动交易")
                         # 执行交易操作
@@ -2025,7 +2025,7 @@ class CryptoTrader:
                             self.logger.warning("交易失败,等待2秒后重试")
                             time.sleep(2)  # 添加延时避免过于频繁的重试
                 # 检查No4价格匹配
-                elif 0 <= (no_price - no4_target ) <= 0.05 and no4_target > 0:
+                elif 0 <= (no_price - no4_target ) <= 0.04 and no4_target > 0:
                     while True:
                         self.logger.info("No 4价格匹配,执行自动交易")
                         # 执行交易操作
@@ -3507,8 +3507,8 @@ class CryptoTrader:
                                                 yes_price = float(prices['yes'])
                                                 no_price = float(prices['no'])
 
-                                            # 判断 YES 和 NO 价格是否在 48-56 之间
-                                            if (48 <= yes_price <= 58 or 48 <= no_price <= 58):
+                                            # 判断 YES 和 NO 价格是否在 48-55 之间
+                                            if (48 <= yes_price <= 55 or 48 <= no_price <= 55):
                                                 # 保存当前 URL 到 config
                                                 self.config['website']['url'] = coin_new_weekly_url
                                                 self.save_config()
