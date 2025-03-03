@@ -118,7 +118,7 @@ class CryptoTrader:
             sys.exit(1)
 
         # 打印启动参数
-        self.logger.info(f"CryptoTrader初始化,启动参数: {sys.argv}")
+        self.logger.info(f"程序初始化,启动参数: {sys.argv}")
     
         # 检查是否是重启
         self.is_restart = '--restart' in sys.argv
@@ -237,22 +237,26 @@ class CryptoTrader:
             self.logger.error(f"保存配置失败: {str(e)}")
             raise
 
-    """从这里开始设置 GUI 直到 785 行"""
+    """从这里开始设置 GUI 直到 790 行"""
     def setup_gui(self):
         self.root = tk.Tk()
-        self.root.title("Polymarket 4次自动交易4%利润率！")
+        self.root.title("Polymarket 4 次重启无线循环完全自动化交易,6%利润率！")
+
         # 创建主滚动框架
         main_canvas = tk.Canvas(self.root)
         scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=main_canvas.yview)
         scrollable_frame = ttk.Frame(main_canvas)
+
         # 配置滚动区域
         scrollable_frame.bind(
             "<Configure>",
             lambda e: main_canvas.configure(scrollregion=main_canvas.bbox("all"))
         )
+
         # 在 Canvas 中创建窗口
         main_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         main_canvas.configure(yscrollcommand=scrollbar.set)
+
         # 简化的滚动事件处理
         def _on_mousewheel(event):
             try:
@@ -267,12 +271,14 @@ class CryptoTrader:
                     main_canvas.yview_scroll(-int(event.delta/120), "units")
             except Exception as e:
                 self.logger.error(f"滚动事件处理错误: {str(e)}")
+
         # 绑定滚动事件
         if platform.system() == 'Linux':
             main_canvas.bind_all("<Button-4>", _on_mousewheel)
             main_canvas.bind_all("<Button-5>", _on_mousewheel)
         else:
             main_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
         # 添加简化的键盘滚动支持
         def _on_arrow_key(event):
             try:
@@ -282,6 +288,7 @@ class CryptoTrader:
                     main_canvas.yview_scroll(1, "units")
             except Exception as e:
                 self.logger.error(f"键盘滚动事件处理错误: {str(e)}")
+
         # 绑定方向键
         main_canvas.bind_all("<Up>", _on_arrow_key)
         main_canvas.bind_all("<Down>", _on_arrow_key)
@@ -292,18 +299,19 @@ class CryptoTrader:
 
         """创建按钮和输入框样式"""
         style = ttk.Style()
-        style.configure('Red.TButton', foreground='red', font=('TkDefaultFont', 14, 'bold'))
-        style.configure('Black.TButton', foreground='black', font=('TkDefaultFont', 14, 'normal'))
-        style.configure('Red.TEntry', foreground='red', font=('TkDefaultFont', 14, 'normal'))
-        style.configure('Blue.TButton', foreground='blue', font=('TkDefaultFont', 14, 'normal'))
-        style.configure('Blue.TLabel', foreground='blue', font=('TkDefaultFont', 14, 'normal'))
-        style.configure('Red.TLabel', foreground='red', font=('TkDefaultFont', 14, 'normal'))
+        style.configure('Red.TButton', foreground='red', font=('TkDefaultFont', 13, 'bold'))
+        style.configure('Black.TButton', foreground='black', font=('TkDefaultFont', 13, 'normal'))
+        style.configure('Red.TEntry', foreground='red', font=('TkDefaultFont', 13, 'normal'))
+        style.configure('Blue.TButton', foreground='blue', font=('TkDefaultFont', 13, 'normal'))
+        style.configure('Blue.TLabel', foreground='blue', font=('TkDefaultFont', 13, 'normal'))
+        style.configure('Red.TLabel', foreground='red', font=('TkDefaultFont', 13, 'normal'))
         style.configure('Red.TLabelframe.Label', foreground='red')  # 设置标签文本颜色为红色
-        style.configure('Black.TLabel', foreground='black', font=('TkDefaultFont', 14, 'normal'))
+        style.configure('Black.TLabel', foreground='black', font=('TkDefaultFont', 13, 'normal'))
         style.configure('Warning.TLabelframe.Label', font=('TkDefaultFont', 18, 'bold'),foreground='red', anchor='center', justify='center')
         
         # 金额设置框架
-        amount_settings_frame = ttk.LabelFrame(scrollable_frame, text="以时间换利润，不可贪心，否则一定亏钱!", padding=(2, 5), style='Warning.TLabelframe')
+        amount_settings_frame = ttk.LabelFrame(scrollable_frame, 
+                                               text="以时间换利润，不可贪心，否则一定亏钱!", padding=(2, 5), style='Warning.TLabelframe')
         amount_settings_frame.pack(fill="x", padx=5, pady=5)
 
         # 创建一个Frame来水平排列标题和警告
@@ -312,7 +320,7 @@ class CryptoTrader:
 
         # 添加标题和红色警告文本在同一行
         ttk.Label(title_frame, 
-                text="铁律:检查XPATH是否正确!不得人为干预自动程序!",
+                text="完全自动化交易!不得人为干预程序!",
                 foreground='red',
                 font=('TkDefaultFont', 18, 'bold')).pack(side=tk.RIGHT, expand=True)
 
@@ -524,12 +532,12 @@ class CryptoTrader:
         
         # Portfolio显示
         self.portfolio_label = ttk.Label(balance_container, text="Portfolio: 等待数据...", 
-                                        font=('Arial', 16), foreground='#9370DB') # 修改为绿色
+                                        font=('Arial', 20), foreground='#9370DB') # 修改为绿色
         self.portfolio_label.pack(side=tk.LEFT, padx=20)
         
         # Cash显示
         self.cash_label = ttk.Label(balance_container, text="Cash: 等待数据...", 
-                                   font=('Arial', 16), foreground='#9370DB') # 修改为绿色
+                                   font=('Arial', 20), foreground='#9370DB') # 修改为绿色
         self.cash_label.pack(side=tk.LEFT, padx=20)
         
         # 最后更新时间 - 靠右下对齐
@@ -726,8 +734,7 @@ class CryptoTrader:
         self.amount_no4_button = ttk.Button(buy_button_frame, text="Amount.No4", width=9)
         self.amount_no4_button.bind('<Button-1>', self.click_amount)
         self.amount_no4_button.grid(row=9, column=3, padx=5, pady=5)
-
-        
+ 
         # 配置列权重使按钮均匀分布
         for i in range(4):
             buy_button_frame.grid_columnconfigure(i, weight=1)
@@ -738,7 +745,7 @@ class CryptoTrader:
 
         # 创建按钮框架
         button_frame = ttk.Frame(sell_frame)
-        button_frame.pack(side=tk.LEFT, padx=2)  # 添加expand=True使容器居
+        button_frame.pack(side=tk.LEFT, padx=2)     
 
         # 第一行按钮
         self.position_sell_yes_button = ttk.Button(button_frame, text="Positions-Sell-Yes", width=13,
@@ -779,14 +786,19 @@ class CryptoTrader:
         copyright_label = ttk.Label(scrollable_frame, text="Powered by 无为 Copyright 2024",
                                    font=('Arial', 12), foreground='gray')
         copyright_label.pack(pady=(0, 5))  # 上边距0，下距5
-    """以上代码从240行到 785 行是设置 GUI 界面的"""
 
-    """以下代码从 788 行到行是程序交易逻辑"""
+    """以上代码从240行到 790 行是设置 GUI 界面的"""
+
+    """以下代码从 793 行到行是程序执行顺序逻辑"""
     def start_monitoring(self):
-        self.price_monitoring = True  # 启用价格监控
-        self.balance_monitoring = True  # 启用资金监控
+        # 启用价格和资金监控
+        self.price_monitoring = True  
+        self.balance_monitoring = True  
 
-        # 直接使用当前显示的网址
+        # 重置交易次数计数器
+        self.trade_count = 0
+        
+        # 直接使用当前网址
         self.target_url = self.url_entry.get()
         self.logger.info(f"开始监控网址: {self.target_url}")
 
@@ -804,38 +816,36 @@ class CryptoTrader:
             
         # 将"开始监控"文字变为红色
         self.start_button.configure(style='Red.TButton')
+
         # 恢复"停止监控"文字为黑色
         self.stop_button.configure(style='Black.TButton')
-        # 重置交易次数计数器
-        self.trade_count = 0
         
         # 启动登录状态监控
         threading.Thread(target=self.start_login_monitoring, daemon=True).start()
-        
+
+        # 使用延时启动带错误处理
         def safe_start(target):
             try:
                 target()
             except Exception as e:
                 self.logger.error(f"线程启动失败: {str(e)}")
 
-        # 使用延时启动带错误处理
-        
         threading.Timer(15, safe_start, args=(self.start_url_monitoring,)).start()
+
         threading.Timer(20, safe_start, args=(self.saturday_auto_update_weekly_url,)).start()
+
         threading.Timer(25, safe_start, args=(self.auto_find_54_coin,)).start() 
+
         self.first_refresh = True 
         threading.Timer(60, safe_start, args=(self.refresh_page,)).start()
-    
-    """以下代码是:threading.Thread(target=self._start_browser_monitoring, 
-    args=(self.target_url,), daemon=True).start()线程启动后执行的函数,直到 995 行"""
-
+   
     def _start_browser_monitoring(self, new_url):
         """在新线程中执行浏览器操作"""
         try:
             self.update_status(f"正在尝试访问: {new_url}")
             start_time = time.time()
             
-            # 优化1：复用已有浏览器实例
+            # 复用已有浏览器实例
             if self.driver and self.driver.service.process:
                 try:
                     # 快速检查浏览器连接状态
@@ -856,11 +866,13 @@ class CryptoTrader:
                         self.driver = webdriver.Chrome(options=chrome_options)
                         # 立即设置初始化标记
                         self.driver.execute_script("console.log('Browser Ready')")
-                        self._browser_ready = True  # 新增状态标记
+                        self._browser_ready = True  
                         self.logger.info(f"浏览器初始化完成(耗时：{time.time()-start_time:.2f}s)")
+
                     except Exception as e:
                         self.logger.error(f"浏览器初始化失败: {str(e)}")
                         self._browser_ready = False
+
                 # 启动初始化线程
                 self._browser_ready = False
                 init_thread = threading.Thread(target=init_browser, daemon=True)
@@ -880,7 +892,7 @@ class CryptoTrader:
                 
                 # 等待页面加载
                 self.update_status("等待页面加载完成...")
-                WebDriverWait(self.driver, 20).until(
+                WebDriverWait(self.driver, 10).until(
                     lambda driver: driver.execute_script('return document.readyState') == 'complete'
                 )
                 
@@ -903,25 +915,27 @@ class CryptoTrader:
                         self.trading_pair_label.config(text="无识别事件名称")
                 except Exception:
                     self.trading_pair_label.config(text="解析失败")
+
                 #  开启监控
                 self.running = True
                 
                 # 启动监控线程
                 threading.Thread(target=self.monitor_prices, daemon=True).start()
-                self.logger.info("启动了monitor_prices监控线程")
                 
             except Exception as e:
                 error_msg = f"加载网站失败: {str(e)}"
                 self.logger.error(error_msg)
                 self._show_error_and_reset(error_msg)  
+
         except Exception as e:
             error_msg = f"启动监控失败: {str(e)}"
             self.logger.error(error_msg)
             self._show_error_and_reset(error_msg)
 
     def _show_error_and_reset(self, error_msg):
-        """显示错误并置按钮状态"""
+        """显示错误并重置按钮状态"""
         self.update_status(error_msg)
+
         # 用after方法确保在线程中执行GUI操作
         self.root.after(0, lambda: messagebox.showerror("错误", error_msg))
         self.root.after(0, lambda: self.start_button.config(state='normal'))
@@ -939,6 +953,7 @@ class CryptoTrader:
                 chrome_options.add_argument('--disable-dev-shm-usage')
                 self.driver = webdriver.Chrome(options=chrome_options)
                 self.update_status("成功连接到浏览器")
+
             target_url = self.url_entry.get()
             
             # 使用JavaScript创建并点击链接来打开新标签页
@@ -972,10 +987,12 @@ class CryptoTrader:
                     self.check_balance()
                     self.check_prices()
                     time.sleep(1)
+
                 except Exception as e:
                     if not self.stop_event.is_set():  # 仅在未停止时记录错误
                         self.logger.error(f"监控失败: {str(e)}")
                     time.sleep(self.retry_interval)
+
         except Exception as e:
             if not self.stop_event.is_set():
                 self.logger.error(f"加载页面失败: {str(e)}")
@@ -1017,12 +1034,11 @@ class CryptoTrader:
                     # 更新价格显示
                     self.yes_price_label.config(
                         text=f"Yes: {prices['yes']}¢ (${yes_price:.2f})",
-                        foreground='red'
-                    )
+                        foreground='red')
+                    
                     self.no_price_label.config(
                         text=f"No: {prices['no']}¢ (${no_price:.2f})",
-                        foreground='red'
-                    )
+                        foreground='red')
                     
                     # 更新最后更新时间
                     current_time = datetime.now().strftime('%H:%M:%S')
@@ -1035,14 +1051,17 @@ class CryptoTrader:
                     self.Forth_trade()
                     self.Sell_yes()
                     self.Sell_no() 
+
                 else:
-                    self.update_status("无法获取价格数据")  
+                    self.update_status("无法获取价格数据")
+
             except Exception as e:
                 self.logger.error(f"价格获取失败: {str(e)}")
                 self.update_status(f"价格获取失败: {str(e)}")
                 self.yes_price_label.config(text="Yes: 获取失败", foreground='red')
                 self.no_price_label.config(text="No: 获取失败", foreground='red')
                 self.root.after(1000, self.check_prices)
+
         except Exception as e:
             self.logger.error(f"检查价格失败: {str(e)}")
             self.update_status(f"价检查错误: {str(e)}")
@@ -1087,16 +1106,19 @@ class CryptoTrader:
                 
                 # 新最后更新间
                 current_time = datetime.now().strftime('%H:%M:%S')
-                self.balance_update_label.config(text=f"最后更新: {current_time}")  
+                self.balance_update_label.config(text=f"最后更新: {current_time}")
+
             except Exception as e:
                 self.logger.error(f"获取Portfolio和Cash失败: {str(e)}")
                 self.portfolio_label.config(text="Portfolio: 获取失败")
                 self.cash_label.config(text="Cash: 获取失败")
                 self.check_balance()
+
         except Exception as e:
             self.logger.error(f"检查资金失败: {str(e)}")
             self.update_status(f"资金检查错误: {str(e)}")
             time.sleep(2)
+
     """以上代码执行了监控价格和获取 CASH 的值。从这里开始程序返回到第 810 行"""  
 
     """以下代码是设置 YES/NO 金额的函数,直到第 1220行"""
@@ -1108,6 +1130,7 @@ class CryptoTrader:
                 self.root.after(1000, lambda: self.try_update_amount(retry_count))
             else:
                 self.logger.warning("更新金额操作达到最大重试次数")
+
         except Exception as e:
             self.logger.error(f"安排更新金额操作失败: {str(e)}")
 
@@ -1235,7 +1258,8 @@ class CryptoTrader:
         """安排重试更新金额"""
         if hasattr(self, 'retry_timer'):
             self.root.after_cancel(self.retry_timer)
-        self.retry_timer = self.root.after(3000, self.set_yes_no_cash)  # 3秒后重试
+        self.retry_timer = self.root.after(3000, self.set_yes_no_cash)
+
     """以上代码执行了设置 YES/NO 金额的函数,从 1020 行到 1220 行,程序执行返回到 815 行"""
 
     """以下代码是启动 URL 监控和登录状态监控的函数,直到第 1402 行"""
@@ -1384,7 +1408,7 @@ class CryptoTrader:
             pyautogui.press('enter')
             
             # 等待弹窗自动关闭
-            time.sleep(0.3)
+            time.sleep(1)
 
             #再次检查是否登录成功
             try:
@@ -1403,16 +1427,8 @@ class CryptoTrader:
             else:
                 # 正常状态无需记录日志
                 pass
-            
-            try:
-                cash_element = self.driver.find_element(By.XPATH, XPathConfig.CASH_VALUE)
-                cash_value = cash_element.text
-            except Exception as e:
-                cash_element = self._find_element_with_retry(XPathConfig.CASH_VALUE)
-                cash_value = cash_element.text
 
-            if self.driver and cash_value:  
-                     
+            if self.driver:       
                 # 直接执行click_accept_button
                 self.logger.info("登录完成,执行click_accept_button")
                 time.sleep(1)
@@ -1420,11 +1436,13 @@ class CryptoTrader:
                 self.click_accept_button()
                 return True
             else:
-                self.logger.error("登录失败,浏览器连接丢失")
+                self.logger.error("执行click_accept_button失败")
                 return False
+            
         except Exception as e:
             self.logger.error(f"登录操作失败: {str(e)}")
             return False
+        
         finally:
             self.start_url_monitoring()
             self.refresh_page()
@@ -1489,10 +1507,12 @@ class CryptoTrader:
                 self.refresh_timer = self.root.after(self.refresh_interval, self.refresh_page)
             else:
                 self.logger.info("程序未运行，停止安排刷新")
+
         except Exception as e:
             self.logger.error(f"页面刷新失败: {str(e)}")
             if self.running:
                 self.refresh_timer = self.root.after(self.refresh_interval, self.refresh_page)
+
     """以上代码执行了登录操作的函数,直到第 1399 行,程序执行返回到 848 行"""
 
     def stop_refresh_page(self):
@@ -1500,12 +1520,9 @@ class CryptoTrader:
         try:
             # 检查定时器是否存在
             if not hasattr(self, 'refresh_timer') or self.refresh_timer is None:
-                
                 return
-                
             # 记录当前定时器ID
             timer_id = self.refresh_timer
-            self.logger.info(f"尝试停止页面刷新定时器 ID: {timer_id}")
             
             # 尝试取消定时器
             try:
@@ -1521,7 +1538,6 @@ class CryptoTrader:
                 
             # 重置定时器变量
             self.refresh_timer = None
-            self.logger.info("页面刷新功能已完全停止")
             
         except Exception as e:
             self.logger.error(f"停止页面刷新时发生未知错误: {str(e)}")
@@ -1662,7 +1678,8 @@ class CryptoTrader:
                             break
                         else:
                             self.logger.warning("交易失败,等待2秒后重试")
-                            time.sleep(2)  # 添加延时避免过于频繁的重试                           
+                            time.sleep(2)  # 添加延时避免过于频繁的重试    
+
         except ValueError as e:
             self.logger.error(f"价格转换错误: {str(e)}")
         except Exception as e:
@@ -1747,6 +1764,7 @@ class CryptoTrader:
                         else:
                             self.logger.warning("交易失败,等待2秒后重试")
                             time.sleep(2)  # 添加延时避免过于频繁的重试
+
                 # 检查No2价格匹配
                 elif 0 <= (no_price - no2_target ) <= 0.05 and no2_target > 0:
                     while True:
@@ -1797,6 +1815,7 @@ class CryptoTrader:
             self.update_status(f"Second_trade执行失败: {str(e)}")
         finally:
             self.trading = False
+
     def Third_trade(self):
         """处理Yes3/No3的自动交易"""
         try:
@@ -1923,6 +1942,7 @@ class CryptoTrader:
             self.update_status(f"Third_trade执行失败: {str(e)}")
         finally:
             self.trading = False
+
     def Forth_trade(self):
         """处理Yes4/No4的自动交易"""
         try:
@@ -2234,9 +2254,9 @@ class CryptoTrader:
             self.logger.error(f"Sell_no执行失败: {str(e)}")
             self.update_status(f"Sell_no执行失败: {str(e)}")
         
-    """以上代码是交易主体函数 1-4,从第 1370 行到第 2027行"""
+    """以上代码是交易主体函数 1-4,从第 1370 行到第 2257行"""
 
-    """以下代码是交易过程中的各种方法函数，涉及到按钮的点击，从第 2029 行到第 2295 行"""
+    """以下代码是交易过程中的各种方法函数，涉及到按钮的点击，从第 2259 行到第 2295 行"""
     def click_buy_confirm_button(self):
         
         try:
@@ -2841,6 +2861,7 @@ class CryptoTrader:
                 return False
                 
         return False  # 所有重试都失败后返回False
+    
     def only_sell_no(self):
         """只卖出NO"""
         max_retries = 3  # 最大重试次数
@@ -3010,7 +3031,8 @@ class CryptoTrader:
                 
                 # 获取交易币对信息
                 full_pair = self.trading_pair_label.cget("text")
-                trading_pair = full_pair.split('-')[0]
+                trading_pair = full_pair.split('on')[0]
+
                 if not trading_pair or trading_pair == "--":
                     trading_pair = "未知交易币对"
                 
@@ -3270,7 +3292,7 @@ class CryptoTrader:
                     # 关闭搜索标签页
                     self.driver.close()
                     # 切换回原始窗口
-                    self.driver.switch_to.window(original_window)
+                    self.driver.switch_to.window(self.original_window)
                     return None
                 try:
                     # 使用确定的XPath查找搜索框
@@ -3451,7 +3473,6 @@ class CryptoTrader:
                                             
                                             # 打开新标签页
                                             self.driver.switch_to.new_window('tab')
-                                            new_tab = self.driver.current_window_handle
                                             self.driver.get(coin_new_weekly_url)
 
                                             # 等待页面加载完成
@@ -3487,11 +3508,11 @@ class CryptoTrader:
                                                 no_price = float(prices['no'])
 
                                             # 判断 YES 和 NO 价格是否在 48-56 之间
-                                            if (48 <= yes_price <= 56 or 48 <= no_price <= 56):
+                                            if (48 <= yes_price <= 58 or 48 <= no_price <= 58):
                                                 # 保存当前 URL 到 config
                                                 self.config['website']['url'] = coin_new_weekly_url
                                                 self.save_config()
-                                                self.logger.info(f"{coin}价格符合要求,保存到 config")
+                                                self.logger.info(f"{coin}: YES{int(yes_price)}¢|NO{int(no_price)}¢ 符合要求,已保存到 config")
                                                 # 关闭当前页面
                                                 self.driver.close()
                                                 # 切换回原始窗口
@@ -3499,7 +3520,7 @@ class CryptoTrader:
                                                 # 重启程序
                                                 self.restart_program()
                                             else:
-                                                self.logger.info(f"{coin}: YES{yes_price}¢,NO{no_price}¢ 不符合要求")
+                                                self.logger.info(f"{coin}: YES{int(yes_price)}¢|NO{int(no_price)}¢ 不符合要求")
                                                 # 关闭当前页面
                                                 self.driver.close()
                                                 # 切换回原始窗口
