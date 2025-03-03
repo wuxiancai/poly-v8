@@ -1490,14 +1490,13 @@ class CryptoTrader:
                 # 检查是否是第一次执行
                 if hasattr(self, 'first_refresh') and self.first_refresh:
                     self.first_refresh = False
-                    #self.refresh_timer = self.root.after(120000, self.refresh_page)  # 120秒 = 120000毫秒
                     return
                 
                 if not self.trading:  # 仅在非交易状态执行刷新
                     if self.driver:
                             
                         self.driver.refresh()
-                        self.logger.info("✅ 定时刷新成功")
+                        self.logger.info("✅定时刷新成功")
                     else:
                         self.logger.error("refresh_page浏览器连接丢失")
                 else:
@@ -3507,12 +3506,12 @@ class CryptoTrader:
                                                 yes_price = float(prices['yes'])
                                                 no_price = float(prices['no'])
 
-                                            # 判断 YES 和 NO 价格是否在 48-55 之间
-                                            if (48 <= yes_price <= 55 or 48 <= no_price <= 55):
+                                            # 判断 YES 和 NO 价格是否在 48-56 之间
+                                            if (45 <= yes_price <= 55 or 45 <= no_price <= 55):
                                                 # 保存当前 URL 到 config
                                                 self.config['website']['url'] = coin_new_weekly_url
                                                 self.save_config()
-                                                self.logger.info(f"{coin}: YES{int(yes_price)}¢|NO{int(no_price)}¢ ✅ 符合要求,已保存到 config")
+                                                self.logger.info(f"{coin}: YES{int(yes_price)}¢|NO{int(no_price)}¢ 符合要求,已保存到 config")
                                                 # 关闭当前页面
                                                 self.driver.close()
                                                 # 切换回原始窗口
@@ -3520,7 +3519,7 @@ class CryptoTrader:
                                                 # 重启程序
                                                 self.restart_program()
                                             else:
-                                                self.logger.info(f"{coin}: YES{int(yes_price)}¢|NO{int(no_price)}¢ ❌ 不符合要求")
+                                                self.logger.info(f"{coin}: YES{int(yes_price)}¢|NO{int(no_price)}¢ 不符合要求")
                                                 # 关闭当前页面
                                                 self.driver.close()
                                                 # 切换回原始窗口
