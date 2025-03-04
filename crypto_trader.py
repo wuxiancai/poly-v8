@@ -83,7 +83,10 @@ class CryptoTrader:
         self.trading = False
         self.url_check_timer = None
         self.is_checking_prices = False
-        
+        # 添加以下属性用于管理auto_find_54_coin线程
+        self.auto_find_thread = None  # 存储auto_find_54_coin线程对象
+        self.stop_auto_find = False   # 控制auto_find_54_coin线程停止的标志
+
         self.url_monitoring_lock = threading.Lock()  # 新增线程锁
         self.retry_count = 3
         self.retry_interval = 5
@@ -789,7 +792,7 @@ class CryptoTrader:
 
     """以上代码从240行到 790 行是设置 GUI 界面的"""
 
-    """以下代码从 793 行到行是程序执行顺序逻辑"""
+    """以下代码从 795 行到行是程序执行顺序逻辑"""
     def start_monitoring(self):
         # 启用价格和资金监控
         self.price_monitoring = True  
@@ -982,12 +985,15 @@ class CryptoTrader:
             self.update_status(f"已在新标签页打开: {target_url}")   
                 
             # 开始监控价格
+            check_counter = 0
             while not self.stop_event.is_set():  # 改用事件判断
                 try:
-                    self.check_balance()
                     self.check_prices()
-                    time.sleep(1)
+                    if check_counter % 10 == 0:
+                        self.check_balance()
 
+                    check_counter += 1
+                    time.sleep(1)
                 except Exception as e:
                     if not self.stop_event.is_set():  # 仅在未停止时记录错误
                         self.logger.error(f"监控失败: {str(e)}")
@@ -1121,7 +1127,7 @@ class CryptoTrader:
 
     """以上代码执行了监控价格和获取 CASH 的值。从这里开始程序返回到第 810 行"""  
 
-    """以下代码是设置 YES/NO 金额的函数,直到第 1220行"""
+    """以下代码是设置 YES/NO 金额的函数,直到第 1270行"""
     def schedule_update_amount(self, retry_count=0):
         """设置金额,带重试机制"""
         try:
@@ -1260,9 +1266,9 @@ class CryptoTrader:
             self.root.after_cancel(self.retry_timer)
         self.retry_timer = self.root.after(3000, self.set_yes_no_cash)
 
-    """以上代码执行了设置 YES/NO 金额的函数,从 1020 行到 1220 行,程序执行返回到 815 行"""
+    """以上代码执行了设置 YES/NO 金额的函数,从 1020 行到 1270 行,程序执行返回到 815 行"""
 
-    """以下代码是启动 URL 监控和登录状态监控的函数,直到第 1402 行"""
+    """以下代码是启动 URL 监控和登录状态监控的函数,直到第 1578 行"""
     def start_url_monitoring(self):
         """启动URL监控"""
         with self.url_monitoring_lock:
@@ -1346,7 +1352,7 @@ class CryptoTrader:
                 
                 # 添加空值检查和安全访问
                 if login_button is not None and "Log In" in login_button.text:
-                    self.logger.warning("未登录，自动登录...")
+                    self.logger.warning("检查到未登录,自动登录...")
                     self.check_and_handle_login()
                 else:
                     # 正常状态无需记录日志
@@ -1369,10 +1375,32 @@ class CryptoTrader:
     def check_and_handle_login(self):
         """执行登录操作"""
         try:
+            # 记录auto_find_54_coin线程状态
+            auto_find_was_running = False
+            # 检查是否需要停止自动找币线程
+            if hasattr(self, 'auto_find_thread') and self.auto_find_thread is not None and self.auto_find_thread.is_alive():
+                self.logger.info("检测到登录,停止自动找币线程")
+                self.stop_auto_find_54_coin()  # 调用停止函数确保完全停止
+                
+                # 增加更强的线程停止机制
+                start_time = time.time()
+                max_wait_time = 10  # 最多等待10秒
+                
+                while self.auto_find_thread.is_alive() and time.time() - start_time < max_wait_time:
+                    self.logger.info("等待auto_find_54_coin线程停止...")
+                    time.sleep(1)
+                
+                if self.auto_find_thread.is_alive():
+                    self.logger.warning(f"auto_find_54_coin线程在{max_wait_time}秒内未能停止，继续执行登录")
+                else:
+                    self.logger.info("auto_find_54_coin线程已成功停止")
+
+
             self.logger.info("开始执行登录操作...")
             self.stop_url_monitoring()
             self.stop_refresh_page()
             time.sleep(1)
+
             # 点击登录按钮
             try:
                 login_button = self.driver.find_element(By.XPATH, XPathConfig.LOGIN_BUTTON)
@@ -1432,8 +1460,14 @@ class CryptoTrader:
                 # 直接执行click_accept_button
                 self.logger.info("登录完成,执行click_accept_button")
                 time.sleep(1)
-                
+                self.driver.refresh()
+                time.sleep(1)
                 self.click_accept_button()
+                
+                # 恢复URL监控和页面刷新
+                self.start_url_monitoring()
+                self.refresh_page()
+                self.auto_find_54_coin()
                 return True
             else:
                 self.logger.error("执行click_accept_button失败")
@@ -1442,10 +1476,6 @@ class CryptoTrader:
         except Exception as e:
             self.logger.error(f"登录操作失败: {str(e)}")
             return False
-        
-        finally:
-            self.start_url_monitoring()
-            self.refresh_page()
 
     def click_accept_button(self):
         """重新登录后,需要在amount输入框输入1并确认"""
@@ -1461,8 +1491,8 @@ class CryptoTrader:
                     silent=True
                 )
                 return
-            # 清除现有输入并输入新值
-            
+
+            # 输入新值
             amount_input.send_keys("1")
             time.sleep(0.5)
             
@@ -1490,7 +1520,8 @@ class CryptoTrader:
                 # 检查是否是第一次执行
                 if hasattr(self, 'first_refresh') and self.first_refresh:
                     self.first_refresh = False
-                    #self.refresh_timer = self.root.after(120000, self.refresh_page)  # 120秒 = 120000毫秒
+                    self.logger.info("首次刷新页面,120秒后开始定时刷新")
+                    self.refresh_timer = self.root.after(120000, self.refresh_page)  # 120秒 = 120000毫秒
                     return
                 
                 if not self.trading:  # 仅在非交易状态执行刷新
@@ -1512,8 +1543,6 @@ class CryptoTrader:
             self.logger.error(f"页面刷新失败: {str(e)}")
             if self.running:
                 self.refresh_timer = self.root.after(self.refresh_interval, self.refresh_page)
-
-    """以上代码执行了登录操作的函数,直到第 1399 行,程序执行返回到 848 行"""
 
     def stop_refresh_page(self):
         """停止页面刷新"""
@@ -1544,7 +1573,7 @@ class CryptoTrader:
             # 确保定时器变量被重置，即使发生错误
             if hasattr(self, 'refresh_timer'):
                 self.refresh_timer = None
-                   
+    """以上代码执行了登录操作的函数,直到第 1578 行,程序执行返回到 848 行"""               
     """以下代码是监控买卖条件及执行交易的函数,程序开始进入交易阶段,从 1400 行直到第 2500 行"""  
     def First_trade(self):
         try:
@@ -1580,7 +1609,7 @@ class CryptoTrader:
                 no1_target = float(self.no1_price_entry.get())
                 
                 # 检查Yes1价格匹配
-                if 0 <= (yes_price - yes1_target ) <= 0.04 and yes1_target > 0:
+                if 0 <= (yes_price - yes1_target ) <= 0.02 and yes1_target > 0:
                     while True:
                         self.logger.info("Yes 1价格匹配,执行自动交易")
                         # 执行现有的交易操作
@@ -1629,7 +1658,7 @@ class CryptoTrader:
                             time.sleep(2)  # 添加延时避免过于频繁的重试
 
                 # 检查No1价格匹配
-                elif 0 <= (no_price - no1_target ) <= 0.04 and no1_target > 0:
+                elif 0 <= (no_price - no1_target ) <= 0.02 and no1_target > 0:
                     while True:
                         self.logger.info("No 1价格匹配,执行自动交易") 
                         # 执行现有的交易操作
@@ -1692,8 +1721,7 @@ class CryptoTrader:
         """处理Yes2/No2的自动交易"""
         try:
             self.trading = True  # 开始交易
-            if not self.driver:
-                raise Exception("Second_trade浏览器连接丢失")
+    
             # 获取当前Yes和No价格
             prices = self.driver.execute_script("""
                 function getPrices() {
@@ -1725,7 +1753,7 @@ class CryptoTrader:
                 no2_target = float(self.no2_price_entry.get())
                 
                 # 检查Yes2价格匹配
-                if 0 <= (yes_price - yes2_target ) <= 0.04 and yes2_target > 0:
+                if 0 <= (yes_price - yes2_target ) <= 0.02 and yes2_target > 0:
                     while True:
                         self.logger.info("Yes 2价格匹配,执行自动交易")
                         # 执行现有的交易操作
@@ -1754,7 +1782,7 @@ class CryptoTrader:
                             self.trade_count += 1
                             # 发送交易邮件
                             self.send_trade_email(
-                                trade_type="Buy Yes2",
+                                trade_type="Buy Yes 2",
                                 price=yes_price,
                                 amount=float(self.buy_yes_amount),
                                 trade_count=self.trade_count
@@ -1766,7 +1794,7 @@ class CryptoTrader:
                             time.sleep(2)  # 添加延时避免过于频繁的重试
 
                 # 检查No2价格匹配
-                elif 0 <= (no_price - no2_target ) <= 0.04 and no2_target > 0:
+                elif 0 <= (no_price - no2_target ) <= 0.02 and no2_target > 0:
                     while True:
                         self.logger.info("No 2价格匹配,执行自动交易")
                         
@@ -1798,7 +1826,7 @@ class CryptoTrader:
                             self.trade_count += 1
                             # 发送交易邮件
                             self.send_trade_email(
-                                trade_type="Buy No2",
+                                trade_type="Buy No 2",
                                 price=no_price,
                                 amount=float(self.buy_no_amount),
                                 trade_count=self.trade_count
@@ -1820,9 +1848,7 @@ class CryptoTrader:
         """处理Yes3/No3的自动交易"""
         try:
             self.trading = True  # 开始交易
-            
-            if not self.driver:
-                raise Exception("Third_trade浏览器连接丢失")  
+
             # 获取当前Yes和No价格
             prices = self.driver.execute_script("""
                 function getPrices() {
@@ -1854,7 +1880,7 @@ class CryptoTrader:
                 no3_target = float(self.no3_price_entry.get())
                 
                 # 检查Yes3价格匹配
-                if 0 <= (yes_price - yes3_target ) <= 0.04 and yes3_target > 0:
+                if 0 <= (yes_price - yes3_target ) <= 0.02 and yes3_target > 0:
                     while True:
                         self.logger.info("Yes 3价格匹配,执行自动交易")
                         # 执行交易操作
@@ -1883,7 +1909,7 @@ class CryptoTrader:
                             self.trade_count += 1
                             # 发送交易邮件
                             self.send_trade_email(
-                                trade_type="Buy Yes3",
+                                trade_type="Buy Yes 3",
                                 price=yes_price,
                                 amount=float(self.buy_yes_amount),
                                 trade_count=self.trade_count
@@ -1894,7 +1920,7 @@ class CryptoTrader:
                             self.logger.warning("交易失败,等待2秒后重试")
                             time.sleep(2)  # 添加延时避免过于频繁的重试
                 # 检查No3价格匹配
-                elif 0 <= (no_price - no3_target ) <= 0.04 and no3_target > 0:
+                elif 0 <= (no_price - no3_target ) <= 0.02 and no3_target > 0:
                     while True:
                         self.logger.info("No 3价格匹配,执行自动交易")
                         # 执行交易操作
@@ -1925,7 +1951,7 @@ class CryptoTrader:
                             self.trade_count += 1
                             # 发送交易邮件
                             self.send_trade_email(
-                                trade_type="Buy No3",
+                                trade_type="Buy No 3",
                                 price=no_price,
                                 amount=float(self.buy_no_amount),
                                 trade_count=self.trade_count
@@ -1947,9 +1973,7 @@ class CryptoTrader:
         """处理Yes4/No4的自动交易"""
         try:
             self.trading = True  # 开始交易
-            
-            if not self.driver:
-                raise Exception("Forth_trade浏览器连接丢失")
+
             # 获取当前Yes和No价格
             prices = self.driver.execute_script("""
                 function getPrices() {
@@ -1981,7 +2005,7 @@ class CryptoTrader:
                 no4_target = float(self.no4_price_entry.get())
                 
                 # 检查Yes4价格匹配
-                if 0 <= (yes_price - yes4_target ) <= 0.04 and yes4_target > 0:
+                if 0 <= (yes_price - yes4_target ) <= 0.02 and yes4_target > 0:
                     while True:
                         self.logger.info("Yes 4价格匹配,执行自动交易")
                         # 执行交易操作
@@ -2014,7 +2038,7 @@ class CryptoTrader:
                             self.trade_count += 1
                             # 发送交易邮件
                             self.send_trade_email(
-                                trade_type="Buy Yes4",
+                                trade_type="Buy Yes 4",
                                 price=yes_price,
                                 amount=float(self.buy_yes_amount),
                                 trade_count=self.trade_count
@@ -2025,7 +2049,7 @@ class CryptoTrader:
                             self.logger.warning("交易失败,等待2秒后重试")
                             time.sleep(2)  # 添加延时避免过于频繁的重试
                 # 检查No4价格匹配
-                elif 0 <= (no_price - no4_target ) <= 0.04 and no4_target > 0:
+                elif 0 <= (no_price - no4_target ) <= 0.02 and no4_target > 0:
                     while True:
                         self.logger.info("No 4价格匹配,执行自动交易")
                         # 执行交易操作
@@ -2082,7 +2106,8 @@ class CryptoTrader:
         try:
             if not self.driver:
                 raise Exception("Sell_yes浏览器连接丢失")
-                
+            self.trading = True  # 开始交易 
+            
             # 获取当前Yes价格
             prices = self.driver.execute_script("""
                 function getPrices() {
@@ -2112,7 +2137,7 @@ class CryptoTrader:
                 yes5_target = float(self.yes5_price_entry.get())
                 
                 # 检查Yes5价格匹配
-                if 0 <= (yes_price - yes5_target) <= 0.1 and yes5_target > 0:
+                if 0 <= (yes_price - yes5_target) <= 0.05 and yes5_target > 0:
                     self.logger.info("Yes 5价格匹配,执行自动卖出")
                     
                     # 执行卖出YES操作
@@ -2171,6 +2196,7 @@ class CryptoTrader:
         try:
             if not self.driver:
                 raise Exception("Sell_no浏览器连接丢失")   
+            self.trading = True  # 开始交易
             
             # 获取当前No价格
             prices = self.driver.execute_script("""
@@ -2201,7 +2227,7 @@ class CryptoTrader:
                 no5_target = float(self.no5_price_entry.get())
                 
                 # 检查No5价格匹配
-                if 0 <= (no_price - no5_target) <= 0.1 and no5_target > 0:
+                if 0 <= (no_price - no5_target) <= 0.05 and no5_target > 0:
                     self.logger.info("No 5价格匹配,执行自动卖出")
                     
                     # 执行卖出NO操作
@@ -2254,11 +2280,11 @@ class CryptoTrader:
             self.logger.error(f"Sell_no执行失败: {str(e)}")
             self.update_status(f"Sell_no执行失败: {str(e)}")
         
-    """以上代码是交易主体函数 1-4,从第 1370 行到第 2257行"""
+    """以上代码是交易主体函数 1-4,从第 1570 行到第 2283行"""
 
-    """以下代码是交易过程中的各种方法函数，涉及到按钮的点击，从第 2259 行到第 2295 行"""
+    """以下代码是交易过程中的各种方法函数，涉及到按钮的点击，从第 2285 行到第 2651 行"""
     def click_buy_confirm_button(self):
-        """点击买入确认按钮"""
+        
         try:
             buy_confirm_button = self.driver.find_element(By.XPATH, XPathConfig.BUY_CONFIRM_BUTTON)
             buy_confirm_button.click()
@@ -2622,7 +2648,7 @@ class CryptoTrader:
             self.logger.error(f"Amount操作失败: {str(e)}")
             self.update_status(f"Amount操作失败: {str(e)}")
 
-    """以下代码是交易过程中的功能性函数,买卖及确认买卖成功,从第 2295 行到第 2573 行"""
+    """以下代码是交易过程中的功能性函数,买卖及确认买卖成功,从第 2651 行到第 2956行"""
     def Verify_buy_yes(self):
         """
         验证交易是否成功完成Returns:bool: 交易是否成功
@@ -2927,7 +2953,7 @@ class CryptoTrader:
                 
         return False  # 所有重试都失败后返回False
         
-    """以下代码是程序重启功能,从第 2583 行到第 2651 行"""
+    """以下代码是程序重启功能,从第 2956 行到第 2651 行"""
     def restart_program(self):
         """重启程序,保持浏览器打开"""
         try:
@@ -3162,7 +3188,7 @@ class CryptoTrader:
         except Exception as e:
             self.logger.error(f"程序运行出错: {str(e)}")
             raise
-    
+    """以下代码是自动找币的函数,从第 3191 行到第 3250 行"""
     def is_position_yes_or_no(self):
         self.logger.info("检查当前是否持仓")
         try:
@@ -3245,133 +3271,133 @@ class CryptoTrader:
     def find_new_weekly_url(self, coin):
         """在Polymarket市场搜索指定币种的周合约地址,只返回周合约地址"""
         try:
-            # 保存原始窗口句柄
-            self.original_window = self.driver.current_window_handle 
+                # 保存原始窗口句柄
+                self.original_tab = self.driver.current_window_handle 
 
-            # 重置所有按钮样式为蓝色
-            for btn in [self.btc_button, self.eth_button, self.solana_button, 
-                    self.xrp_button, self.doge_button]:
-                btn.configure(style='Blue.TButton')
-            
-            # 设置被点击的按钮为红色
-            if coin == 'BTC':
-                self.btc_button.configure(style='Red.TButton')
-            elif coin == 'ETH':
-                self.eth_button.configure(style='Red.TButton')
-            elif coin == 'SOLANA':
-                self.solana_button.configure(style='Red.TButton')
-            elif coin == 'XRP':
-                self.xrp_button.configure(style='Red.TButton')
-            elif coin == 'DOGE':
-                self.doge_button.configure(style='Red.TButton')
+                # 重置所有按钮样式为蓝色
+                for btn in [self.btc_button, self.eth_button, self.solana_button, 
+                        self.xrp_button, self.doge_button]:
+                    btn.configure(style='Blue.TButton')
+                
+                # 设置被点击的按钮为红色
+                if coin == 'BTC':
+                    self.btc_button.configure(style='Red.TButton')
+                elif coin == 'ETH':
+                    self.eth_button.configure(style='Red.TButton')
+                elif coin == 'SOLANA':
+                    self.solana_button.configure(style='Red.TButton')
+                elif coin == 'XRP':
+                    self.xrp_button.configure(style='Red.TButton')
+                elif coin == 'DOGE':
+                    self.doge_button.configure(style='Red.TButton')
 
-            base_url = "https://polymarket.com/markets/crypto?_s=start_date%3Adesc"
-            self.driver.switch_to.new_window('tab')
-            # 定义search_tab变量，保存搜索标签页的句柄
-            search_tab = self.driver.current_window_handle
-            self.driver.get(base_url)
-            
-            # 等待页面加载完成
-            WebDriverWait(self.driver, 20).until(
-                EC.presence_of_element_located((By.TAG_NAME, "body"))
-            )
-            time.sleep(3)  # 等待页面渲染完成
-            
-            # 设置搜索关键词
-            link_text_map = {
-                'BTC': 'Bitcoin above',
-                'ETH': 'Ethereum above',
-                'SOLANA': 'Solana above',
-                'XRP': 'Ripple above',
-                'DOGE': 'Dogecoin above'
-            }
-            search_text = link_text_map.get(coin, '')
-            
-            if not search_text:
-                self.logger.error(f"无效的币种: {coin}")
-                # 关闭搜索标签页
-                self.driver.close()
-                # 切换回原始窗口
-                self.driver.switch_to.window(self.original_window)
-                return None
-            try:
-                # 使用确定的XPath查找搜索框
-                try:
-                    search_box = self.driver.find_element(By.XPATH, XPathConfig.SEARCH_INPUT)
-                except Exception as e:
-                    search_box = self._find_element_with_retry(
-                        XPathConfig.SEARCH_INPUT,
-                        timeout=3,
-                        silent=True
-                    )
-                    
-                # 创建ActionChains对象
-                actions = ActionChains(self.driver)
+                base_url = "https://polymarket.com/markets/crypto?_s=start_date%3Adesc"
+                self.driver.switch_to.new_window('tab')
+                self.driver.get(base_url)
+
+                # 定义search_tab变量，保存搜索标签页的句柄
+                search_tab = self.driver.current_window_handle
+                # 等待页面加载完成
+                WebDriverWait(self.driver, 20).until(
+                    EC.presence_of_element_located((By.TAG_NAME, "body"))
+                )
+                time.sleep(3)  # 等待页面渲染完成
                 
-                # 清除搜索框并输入搜索词
-                search_box.clear()
-                search_box.send_keys(search_text)
-                time.sleep(1)  # 等待搜索词输入完成
+                # 设置搜索关键词
+                link_text_map = {
+                    'BTC': 'Bitcoin above',
+                    'ETH': 'Ethereum above',
+                    'SOLANA': 'Solana above',
+                    'XRP': 'Ripple above',
+                    'DOGE': 'Dogecoin above'
+                }
+                search_text = link_text_map.get(coin, '')
                 
-                # 按ENTER键开始搜索
-                actions.send_keys(Keys.RETURN).perform()
-                time.sleep(1)  # 等待搜索结果加载
-                
-                # 按4次TAB键
-                for i in range(4):
-                    actions.send_keys(Keys.TAB).perform()
-                    time.sleep(0.3)  # 每次TAB之间等待1秒
-                
-                # 使用正确的组合键（Windows/Linux用Ctrl+Enter，Mac用Command+Enter）
-                modifier_key = Keys.COMMAND if sys.platform == 'darwin' else Keys.CONTROL
-                
-                # 创建动作链
-                actions = ActionChains(self.driver)
-                actions.key_down(modifier_key).send_keys(Keys.ENTER).key_up(modifier_key).perform()
-                
-                # 切换到新标签页获取完整URL
-                time.sleep(1)  # 等待新标签页打开
-        
-                # 获取所有窗口句柄
-                all_handles = self.driver.window_handles
-                    
-                # 切换到最新打开的标签页
-                if len(all_handles) > 2:  # 原始窗口 + 搜索标签页 + 新标签页
-                    self.driver.switch_to.window(all_handles[-1])
-                    WebDriverWait(self.driver, 10).until(EC.url_contains('/event/'))
-                    
-                    # 获取当前URL
-                    new_weekly_url = self.driver.current_url
-                    
-                    # 关闭当前标签页
-                    self.driver.close()
-                    
-                    # 切换回搜索标签页
-                    self.driver.switch_to.window(search_tab)
-                    
-                    # 关闭搜索标签页
-                    self.driver.close()
-                    
-                    # 切换回原始窗口
-                    self.driver.switch_to.window(self.original_window)
-                    
-                    return new_weekly_url
-                else:
-                    self.logger.warning(f"未能打开{coin}的详情页")
+                if not search_text:
+                    self.logger.error(f"无效的币种: {coin}")
                     # 关闭搜索标签页
                     self.driver.close()
                     # 切换回原始窗口
-                    self.driver.switch_to.window(self.original_window)
+                    self.driver.switch_to.window(self.original_tab)
                     return None
+                try:
+                    # 使用确定的XPath查找搜索框
+                    try:
+                        search_box = self.driver.find_element(By.XPATH, XPathConfig.SEARCH_INPUT)
+                    except Exception as e:
+                        search_box = self._find_element_with_retry(
+                            XPathConfig.SEARCH_INPUT,
+                            timeout=3,
+                            silent=True
+                        )
                     
-            except NoSuchElementException as e:
-                self.logger.warning(f"未找到{coin}周合约链接: {str(e)}")
-                # 关闭搜索标签页
-                self.driver.close()
-                # 切换回原始窗口
-                self.driver.switch_to.window(self.original_window)
-                return None
+                    # 创建ActionChains对象
+                    actions = ActionChains(self.driver)
+                    
+                    # 清除搜索框并输入搜索词
+                    search_box.clear()
+                    search_box.send_keys(search_text)
+                    time.sleep(1)  # 等待搜索词输入完成
+                    
+                    # 按ENTER键开始搜索
+                    actions.send_keys(Keys.RETURN).perform()
+                    time.sleep(1)  # 等待搜索结果加载
+                    
+                    # 按4次TAB键
+                    for i in range(4):
+                        actions.send_keys(Keys.TAB).perform()
+                        time.sleep(0.3)  # 每次TAB之间等待1秒
+                    
+                    # 使用正确的组合键（Windows/Linux用Ctrl+Enter，Mac用Command+Enter）
+                    modifier_key = Keys.COMMAND if sys.platform == 'darwin' else Keys.CONTROL
+                    
+                    # 创建动作链
+                    actions = ActionChains(self.driver)
+                    actions.key_down(modifier_key).send_keys(Keys.ENTER).key_up(modifier_key).perform()
+                    
+                    # 切换到新标签页获取完整URL
+                    time.sleep(1)  # 等待新标签页打开
+            
+                    # 获取所有窗口句柄
+                    all_handles = self.driver.window_handles
+                    
+                    # 切换到最新打开的标签页
+                    if len(all_handles) > 2:  # 原始窗口 + 搜索标签页 + coin标签页
+                        time.sleep(2)  # 等待新标签页打开
+                        self.driver.switch_to.window(all_handles[-1])
+                        WebDriverWait(self.driver, 20).until(EC.url_contains('/event/'))
+                        
+                        # 获取当前URL
+                        new_weekly_url = self.driver.current_url
 
+                        # 关闭当前URL标签页
+                        self.driver.close()
+                        
+                        # 切换回搜索标签页
+                        self.driver.switch_to.window(search_tab)
+                        
+                        # 关闭搜索标签页
+                        self.driver.close()
+                        
+                        # 切换回原始窗口
+                        self.driver.switch_to.window(self.original_tab)
+                        
+                        return new_weekly_url
+                    else:
+                        self.logger.warning(f"未能打开{coin}的详情页")
+                        # 关闭搜索标签页
+                        self.driver.close()
+                        # 切换回原始窗口
+                        self.driver.switch_to.window(self.original_tab)
+                        return None
+                    
+                except NoSuchElementException as e:
+                    self.logger.warning(f"未找到{coin}周合约链接: {str(e)}")
+                    # 关闭搜索标签页
+                    self.driver.close()
+                    # 切换回原始窗口
+                    self.driver.switch_to.window(self.original_tab)
+                    return None
         except Exception as e:
             self.logger.error(f"操作失败: {str(e)}")
             # 尝试恢复到原始窗口
@@ -3381,12 +3407,12 @@ class CryptoTrader:
                 
                 # 关闭除原始窗口外的所有标签页
                 for handle in all_handles:
-                    if handle != self.original_window:
+                    if handle != self.original_tab:
                         self.driver.switch_to.window(handle)
                         self.driver.close()
                 
                 # 切换回原始窗口
-                self.driver.switch_to.window(self.original_window)
+                self.driver.switch_to.window(self.original_tab)
             except Exception as inner_e:
                 self.logger.error(f"恢复窗口时出错: {str(inner_e)}")
             
@@ -3395,6 +3421,7 @@ class CryptoTrader:
     #-----------------以下是自动找 54 币的函数-----------------
     def is_auto_find_54_coin_time(self):
         """判断是否处于自动找币时段(周六13点至周五20点)"""
+        self.logger.info("检查是否处于自动找币时段")
         try:
             beijing_tz = timezone(timedelta(hours=8))
             now = datetime.now(timezone.utc).astimezone(beijing_tz)
@@ -3429,152 +3456,206 @@ class CryptoTrader:
     def auto_find_54_coin(self):
         """自动找54币"""
         self.logger.info("进入自动找54币模式")
-        if self.check_restart():
-            time.sleep(1800)
-            self.logger.info("等待30分钟后重试")
+        # 确保有停止标志
+        self.stop_auto_find = False
 
-        if not self.is_position_yes_or_no():
-            try:
-                # 停止URL监控
-                self.stop_url_monitoring()
-                self.stop_refresh_page()
-                time.sleep(1)
+        while not self.stop_auto_find and self.running:
+            if self.check_restart():
+                time.sleep(600)
+                self.logger.info("等待10分钟后重试")
 
-                if self.is_auto_find_54_coin_time():# 判断是否处于自动找币时段
-                        self.logger.info("开始循环找币!")
-                    
-                        # 找币 函数
-                        def find_54_coin():
-                            try:
-                                # 保存原始窗口句柄，确保在整个过程中有一个稳定的引用
-                                original_window = self.driver.current_window_handle
-                                
-                                # 设置搜索关键词
-                                coins = [
-                                    'BTC',
-                                    'ETH',
-                                    'SOLANA',
-                                    'XRP',
-                                    'DOGE'
-                                ]
-                                
-                                for coin in coins:
-                                    try:  # 为每个币种添加单独的异常处理
-                                        coin_new_weekly_url = self.find_new_weekly_url(coin)
-                                        
-                                        if coin_new_weekly_url:
-                                            # 确保我们从原始窗口开始
-                                            try:
-                                                self.driver.switch_to.window(original_window)
-                                            except Exception as e:
-                                                self.logger.error(f"切换到原始窗口失败: {str(e)}")
-                                                # 如果原始窗口不可用，可能需要重新创建一个窗口
-                                                self.driver.switch_to.new_window('tab')
-                                                original_window = self.driver.current_window_handle
-                                            
-                                            # 打开新标签页
-                                            self.driver.switch_to.new_window('tab')
-                                            self.driver.get(coin_new_weekly_url)
+            if not self.is_position_yes_or_no():
+                try:
+                    # 停止URL监控
+                    self.stop_url_monitoring()
+                    self.stop_refresh_page()
+                    time.sleep(1)
 
-                                            # 等待页面加载完成
-                                            WebDriverWait(self.driver, 20).until(
-                                                EC.presence_of_element_located((By.TAG_NAME, "body"))
-                                            )
-                                            time.sleep(3)  # 等待页面渲染完成
-                                            
-                                            # 获取Yes和No的价格
-                                            prices = self.driver.execute_script("""
-                                                function getPrices() {
-                                                    const prices = {yes: null, no: null};
-                                                    const elements = document.getElementsByTagName('span');
-                                                    
-                                                    for (let el of elements) {
-                                                        const text = el.textContent.trim();
-                                                        if (text.includes('Yes') && text.includes('¢')) {
-                                                            const match = text.match(/(\\d+\\.?\\d*)¢/);
-                                                            if (match) prices.yes = parseFloat(match[1]);
-                                                        }
-                                                        if (text.includes('No') && text.includes('¢')) {
-                                                            const match = text.match(/(\\d+\\.?\\d*)¢/);
-                                                            if (match) prices.no = parseFloat(match[1]);
-                                                        }
-                                                    }
-                                                    return prices;
-                                                }
-                                                return getPrices();
-                                            """)
+                    # 检查是否被要求停止
+                    if self.stop_auto_find:
+                        self.logger.info("检测到停止标志,auto_find_54_coin线程退出")
+                        break
 
-                                            if prices['yes'] is not None and prices['no'] is not None:
-                                                yes_price = float(prices['yes'])
-                                                no_price = float(prices['no'])
-
-                                            # 判断 YES 和 NO 价格是否在 48-56 之间
-                                            if (46 <= yes_price <= 54 or 46 <= no_price <= 54):
-                                                # 保存当前 URL 到 config
-                                                self.config['website']['url'] = coin_new_weekly_url
-                                                self.save_config()
-                                                self.logger.info(f"{coin}: YES{int(yes_price)}¢|NO{int(no_price)}¢ 符合要求,已保存到 config")
-                                                # 关闭当前页面
-                                                self.driver.close()
-                                                # 切换回原始窗口
-                                                self.driver.switch_to.window(original_window)
-                                                # 重启程序
-                                                self.restart_program()
-                                            else:
-                                                self.logger.info(f"{coin}: YES{int(yes_price)}¢|NO{int(no_price)}¢ 不符合要求")
-                                                # 关闭当前页面
-                                                self.driver.close()
-                                                # 切换回原始窗口
-                                                self.driver.switch_to.window(original_window)
-                                                   
-                                        else:
-                                            self.logger.warning(f"未找到{coin}的周合约URL")
-                                    except Exception as e:
-                                        self.logger.error(f"处理{coin}时出错: {str(e)}")
-                                        # 尝试恢复到原始窗口并继续下一个币种
-                                        try:
-                                            # 确保我们关闭了所有可能打开的新标签页
-                                            current_handles = self.driver.window_handles
-                                            for handle in current_handles:
-                                                if handle != original_window:
-                                                    self.driver.switch_to.window(handle)
-                                                    self.driver.close()
-                                            # 切换回原始窗口
-                                            self.driver.switch_to.window(original_window)
-                                        except Exception as inner_e:
-                                            self.logger.error(f"恢复窗口时出错: {str(inner_e)}")
-                                            # 如果无法恢复，可能需要重新创建浏览器会话
-                                            self._start_browser_monitoring(self.target_url)
-                                            break  # 中断循环，避免继续出错
-                                # 等待 10 分钟后重复找币
-                                threading.Timer(600, self.auto_find_54_coin).start()
-                                self.logger.info("等待10分钟后重复找币")
-
-                            except Exception as e:
-                                self.logger.error(f"自动找币异常: {str(e)}")
-                                # 尝试重新初始化浏览器
+                    if self.is_auto_find_54_coin_time():# 判断是否处于自动找币时段
+                            self.logger.info("开始循环找币!")
+                        
+                            # 找币 函数
+                            def find_54_coin():
                                 try:
-                                    self._start_browser_monitoring(self.target_url)
-                                except Exception as browser_e:
-                                    self.logger.error(f"重新初始化浏览器失败: {str(browser_e)}")
-                else:
-                    self.logger.debug("当前不在自动找币时段")
+                                    # 保存原始窗口句柄，确保在整个过程中有一个稳定的引用
+                                    original_window = self.driver.current_window_handle
+                                    
+                                    # 设置搜索关键词
+                                    coins = [
+                                        'BTC',
+                                        'ETH',
+                                        'SOLANA',
+                                        'XRP',
+                                        'DOGE'
+                                    ]
+                                    
+                                    for coin in coins:
+                                        try:  # 为每个币种添加单独的异常处理
+                                            coin_new_weekly_url = self.find_new_weekly_url(coin)
+                                            
+                                            if coin_new_weekly_url:
+                                                # 确保我们从原始窗口开始
+                                                try:
+                                                    self.driver.switch_to.window(original_window)
+                                                except Exception as e:
+                                                    self.logger.error(f"切换到原始窗口失败: {str(e)}")
+                                                    # 如果原始窗口不可用，可能需要重新创建一个窗口
+                                                    self.driver.switch_to.new_window('tab')
+                                                    original_window = self.driver.current_window_handle
+                                                
+                                                # 打开新标签页
+                                                self.driver.switch_to.new_window('tab')
+                                                self.driver.get(coin_new_weekly_url)
 
-                # 使用独立线程执行找币
-                find_thread = threading.Thread(target=find_54_coin)
-                find_thread.start()
-                find_thread.join()  # 最多等待60秒
+                                                # 等待页面加载完成
+                                                WebDriverWait(self.driver, 20).until(
+                                                    EC.presence_of_element_located((By.TAG_NAME, "body"))
+                                                )
+                                                time.sleep(3)  # 等待页面渲染完成
+                                                
+                                                # 获取Yes和No的价格
+                                                prices = self.driver.execute_script("""
+                                                    function getPrices() {
+                                                        const prices = {yes: null, no: null};
+                                                        const elements = document.getElementsByTagName('span');
+                                                        
+                                                        for (let el of elements) {
+                                                            const text = el.textContent.trim();
+                                                            if (text.includes('Yes') && text.includes('¢')) {
+                                                                const match = text.match(/(\\d+\\.?\\d*)¢/);
+                                                                if (match) prices.yes = parseFloat(match[1]);
+                                                            }
+                                                            if (text.includes('No') && text.includes('¢')) {
+                                                                const match = text.match(/(\\d+\\.?\\d*)¢/);
+                                                                if (match) prices.no = parseFloat(match[1]);
+                                                            }
+                                                        }
+                                                        return prices;
+                                                    }
+                                                    return getPrices();
+                                                """)
 
-            except Exception as e:
-                self.logger.error(f"自动找币异常: {str(e)}")
-            finally:
-                # 安全恢复监控（双重保障）
-                if not self.is_url_monitoring:
-                    self.logger.info("✅ 找币完成,已恢复URL监控")
-                    self.start_url_monitoring()
-                    self.refresh_page()           
+                                                if prices['yes'] is not None and prices['no'] is not None:
+                                                    yes_price = float(prices['yes'])
+                                                    no_price = float(prices['no'])
+
+                                                # 判断 YES 和 NO 价格是否在 48-56 之间
+                                                if (44 <= yes_price <= 56 or 44 <= no_price <= 56):
+                                                    # 保存当前 URL 到 config
+                                                    self.config['website']['url'] = coin_new_weekly_url
+                                                    self.save_config()
+                                                    self.logger.info(f"{coin}: YES{int(yes_price)}¢|NO{int(no_price)}¢ 符合要求,已保存到 config")
+                                                    # 关闭当前页面
+                                                    self.driver.close()
+                                                    # 切换回原始窗口
+                                                    self.driver.switch_to.window(original_window)
+                                                    # 重启程序
+                                                    self.restart_program()
+                                                else:
+                                                    self.logger.info(f"{coin}: YES{int(yes_price)}¢|NO{int(no_price)}¢❌ 不符合要求")
+                                                    # 关闭当前页面
+                                                    self.driver.close()
+                                                    # 切换回原始窗口
+                                                    self.driver.switch_to.window(original_window)
+                                                    
+                                            else:
+                                                self.logger.warning(f"未找到{coin}的周合约URL")
+                                        except Exception as e:
+                                            self.logger.error(f"处理{coin}时出错: {str(e)}")
+                                            # 尝试恢复到原始窗口并继续下一个币种
+                                            try:
+                                                # 确保我们关闭了所有可能打开的新标签页
+                                                current_handles = self.driver.window_handles
+                                                for handle in current_handles:
+                                                    if handle != original_window:
+                                                        self.driver.switch_to.window(handle)
+                                                        self.driver.close()
+                                                # 切换回原始窗口
+                                                self.driver.switch_to.window(original_window)
+                                            except Exception as inner_e:
+                                                self.logger.error(f"恢复窗口时出错: {str(inner_e)}")
+                                                # 如果无法恢复，可能需要重新创建浏览器会话
+                                                self._start_browser_monitoring(self.target_url)
+                                                break  # 中断循环，避免继续出错
+
+                                except Exception as e:
+                                    self.logger.error(f"自动找币异常: {str(e)}")
+                                    # 尝试重新初始化浏览器
+                                    try:
+                                        self._start_browser_monitoring(self.target_url)
+                                    except Exception as browser_e:
+                                        self.logger.error(f"重新初始化浏览器失败: {str(browser_e)}")
+                    else:
+                        self.logger.debug("当前不在自动找币时段")
+
+                    # 使用独立线程执行找币
+                    find_thread = threading.Thread(target=find_54_coin)
+                    find_thread.start()
+                    find_thread.join()  # 最多等待60秒
+
+                except Exception as e:
+                    self.logger.error(f"自动找币异常: {str(e)}")
+                finally:
+                    # 只有在没有被要求停止时才恢复监控
+                    if not self.stop_auto_find and not self.is_url_monitoring:
+                        self.logger.info("✅ 找币完成,已恢复URL监控")
+                        self.start_url_monitoring()
+                        self.refresh_page()               
+            else:
+                self.logger.info("当前持仓，停止找币")
+            # 定期检查停止标志
+            if self.stop_auto_find:
+                self.logger.info("检测到停止标志,auto_find_54_coin线程退出")
+                break
+
+            # 等待10分钟后再次执行找币
+            self.logger.info("等待10分钟后重复找币")
+            for i in range(10):
+                if self.stop_auto_find:
+                    self.logger.info("等待过程中检测到停止标志，取消等待")
+                    break
+                time.sleep(30)  # 每分钟检查一次停止标志
+                if i < 9 and not self.stop_auto_find:  # 避免最后一次不必要的日志
+                    self.logger.debug(f"找币等待中: {i+1}/10 分钟")
+
+            time.sleep(1)  # 避免CPU过载
+
+    def start_auto_find_54_coin(self):
+        """启动自动寻找0.54币种线程"""
+        if hasattr(self, 'auto_find_thread') and self.auto_find_thread is not None and self.auto_find_thread.is_alive():
+            self.logger.info("auto_find_54_coin线程已在运行")
+            return
+            
+        self.stop_auto_find = False  # 重置停止标志
+        self.auto_find_thread = threading.Thread(target=self.auto_find_54_coin, daemon=True)
+        self.auto_find_thread.start()
+        self.logger.info("已启动auto_find_54_coin线程")
+        
+    def stop_auto_find_54_coin(self):
+        """停止自动寻找0.54币种线程"""
+        if hasattr(self, 'auto_find_thread') and self.auto_find_thread is not None and self.auto_find_thread.is_alive():
+            self.logger.info("正在停止auto_find_54_coin线程")
+            self.stop_auto_find = True
+            
+            # 增加更强的线程停止机制
+            start_time = time.time()
+            max_wait_time = 8  # 最多等待8秒
+            
+            while self.auto_find_thread.is_alive() and time.time() - start_time < max_wait_time:
+                self.logger.info("等待auto_find_54_coin线程停止...")
+                time.sleep(1)
+            
+            if self.auto_find_thread.is_alive():
+                self.logger.warning("auto_find_54_coin线程未能在10秒内停止")
+            else:
+                self.logger.info("auto_find_54_coin线程已停止")
         else:
-            self.logger.info("当前持仓，停止找币")
+            self.logger.info("auto_find_54_coin线程未运行")
 
     #-----------------以上是自动找 54 币的函数-----------------
     def _find_element_with_retry(self, xpaths, timeout=10, silent=False):
