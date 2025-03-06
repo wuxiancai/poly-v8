@@ -1544,16 +1544,11 @@ class CryptoTrader:
                 # 延迟30秒后再次尝试
                 self.refresh_timer = self.root.after(30000, self.refresh_page)
                 return
-                
-            # 添加日志以便调试
-            self.logger.info("准备执行页面刷新")
             
             # 使用线程执行刷新操作，避免阻塞主线程
             def do_refresh():
                 try:
                     start_time = time.time()
-                    self.logger.info("刷新线程开始执行")
-                    
                     # 使用锁保护浏览器操作
                     with self.driver_lock:
                         # 设置页面加载超时
@@ -1572,7 +1567,6 @@ class CryptoTrader:
                                 self.logger.error(f"页面刷新失败: {str(e)}")
                     
                     elapsed = time.time() - start_time
-                    self.logger.info(f"页面刷新完成，耗时: {elapsed:.2f}秒")
                     
                 except Exception as e:
                     self.logger.error(f"刷新页面线程中出错: {str(e)}")
@@ -1583,7 +1577,6 @@ class CryptoTrader:
             
             # 安排下一次刷新，增加间隔时间减少卡顿
             self.refresh_timer = self.root.after(600000, self.refresh_page)  # 10分钟 = 600000毫秒
-            self.logger.info("已安排下一次页面刷新,间隔10分钟")
         except Exception as e:
             self.logger.error(f"刷新页面调度失败: {str(e)}")
             # 即使失败也要安排下一次刷新
