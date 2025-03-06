@@ -3391,10 +3391,13 @@ class CryptoTrader:
             # 同时检查Yes/No两种持仓标签
             yes_element = self.find_position_label_yes()
             no_element = self.find_position_label_no()
-            
+
+            full_pair = self.trading_pair_label.cget("text")
+            trading_pair = full_pair.split('-above')[0]
+
             # 任一标签显示持仓状态即返回True
             if (yes_element and yes_element=="Yes") or (no_element and no_element=="No"):
-                self.logger.info(f"检测到持仓状态,持仓为{yes_element}或{no_element}")
+                self.logger.info(f"检测到持仓状态,持仓为{trading_pair}:{yes_element}或{no_element}")
                 return True
             elif yes_element is None and no_element is None:
                 return False
