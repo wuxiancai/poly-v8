@@ -86,7 +86,7 @@ class CryptoTrader:
         # 添加以下属性用于管理auto_find_54_coin线程
         self.auto_find_thread = None  # 存储auto_find_54_coin线程对象
         self.stop_auto_find = False   # 控制auto_find_54_coin线程停止的标志
-
+        self.driver_lock = threading.Lock()  # 添加浏览器操作锁
         self.url_monitoring_lock = threading.Lock()  # 新增线程锁
         self.retry_count = 3
         self.retry_interval = 5
@@ -99,6 +99,8 @@ class CryptoTrader:
         self._amounts_logged = False
         # 在初始化部分添加
         self.stop_event = threading.Event()
+        # 添加性能监控标志
+        self.enable_performance_monitor = True
         # 初始化金额属性
         for i in range(1, 4):  # 1到3
             setattr(self, f'yes{i}_amount', 0.0)
@@ -134,7 +136,7 @@ class CryptoTrader:
         # 添加登录状态监控定时器
         self.login_check_timer = None
         self.driver_lock = threading.Lock()  # 添加浏览器操作锁
-            
+
     def load_config(self):
         """加载配置文件，保持默认格式"""
         try:
@@ -790,6 +792,7 @@ class CryptoTrader:
                                    font=('Arial', 12), foreground='gray')
         copyright_label.pack(pady=(0, 5))  # 上边距0，下距5
 
+
     """以上代码从240行到 790 行是设置 GUI 界面的"""
 
     """以下代码从 795 行到行是程序执行顺序逻辑"""
@@ -840,7 +843,7 @@ class CryptoTrader:
         threading.Timer(25, safe_start, args=(self.auto_find_54_coin,)).start() 
 
         self.first_refresh = True 
-        threading.Timer(60, safe_start, args=(self.refresh_page,)).start()
+        threading.Timer(90, safe_start, args=(self.refresh_page,)).start()
    
     def _start_browser_monitoring(self, new_url):
         """在新线程中执行浏览器操作"""
@@ -1011,118 +1014,116 @@ class CryptoTrader:
                 raise Exception("monitor_prices浏览器连接丢失")
             
             try:
-                # 使用JavaScript直接获取价格
-                prices = self.driver.execute_script("""
-                    function getPrices() {
-                        const prices = {yes: null, no: null};
-                        const elements = document.getElementsByTagName('span');
-                        
-                        for (let el of elements) {
-                            const text = el.textContent.trim();
-                            if (text.includes('Yes') && text.includes('¢')) {
-                                const match = text.match(/(\\d+\\.?\\d*)¢/);
-                                if (match) prices.yes = parseFloat(match[1]);
+                # 使用锁保护浏览器操作
+                with self.driver_lock:
+                    # 使用JavaScript直接获取价格
+                    prices = self.driver.execute_script("""
+                        function getPrices() {
+                            const prices = {yes: null, no: null};
+                            const elements = document.getElementsByTagName('span');
+                            
+                            for (let el of elements) {
+                                const text = el.textContent.trim();
+                                if (text.includes('Yes') && text.includes('¢')) {
+                                    const match = text.match(/(\\d+\\.?\\d*)¢/);
+                                    if (match) prices.yes = parseFloat(match[1]);
+                                }
+                                if (text.includes('No') && text.includes('¢')) {
+                                    const match = text.match(/(\\d+\\.?\\d*)¢/);
+                                    if (match) prices.no = parseFloat(match[1]);
+                                }
                             }
-                            if (text.includes('No') && text.includes('¢')) {
-                                const match = text.match(/(\\d+\\.?\\d*)¢/);
-                                if (match) prices.no = parseFloat(match[1]);
-                            }
+                            return prices;
                         }
-                        return prices;
-                    }
-                    return getPrices();
-                """)
-                
-                if prices['yes'] is not None and prices['no'] is not None:
-                    yes_price = float(prices['yes']) / 100
-                    no_price = float(prices['no']) / 100
+                        return getPrices();
+                    """)
                     
-                    # 更新价格显示
-                    self.yes_price_label.config(
-                        text=f"Yes: {prices['yes']}¢ (${yes_price:.2f})",
-                        foreground='red')
-                    
-                    self.no_price_label.config(
-                        text=f"No: {prices['no']}¢ (${no_price:.2f})",
-                        foreground='red')
-                    
-                    # 更新最后更新时间
-                    current_time = datetime.now().strftime('%H:%M:%S')
-                    self.last_update_label.config(text=f"最后更新: {current_time}")
-                    
-                    # 执行所有交易检查函数
-                    self.First_trade()
-                    self.Second_trade()
-                    self.Third_trade()
-                    self.Forth_trade()
-                    self.Sell_yes()
-                    self.Sell_no() 
-
-                else:
-                    self.update_status("无法获取价格数据")
-
+                    if prices['yes'] is not None and prices['no'] is not None:
+                        yes_price = float(prices['yes']) / 100
+                        no_price = float(prices['no']) / 100
+                        
+                        # 更新价格显示 - 使用 after 方法确保在主线程中更新 UI
+                        self.root.after(0, lambda: self.yes_price_label.config(
+                            text=f"Yes: {prices['yes']}¢ (${yes_price:.2f})",
+                            foreground='red'))
+                        
+                        self.root.after(0, lambda: self.no_price_label.config(
+                            text=f"No: {prices['no']}¢ (${no_price:.2f})",
+                            foreground='red'))
+                        # 使用线程执行交易检查
+                        threading.Thread(target=self._check_trade_conditions, 
+                                    args=(yes_price, no_price), 
+                                    daemon=True).start()
+                    else:
+                        self.root.after(0, lambda: self.update_status("无法获取价格数据"))
             except Exception as e:
                 self.logger.error(f"价格获取失败: {str(e)}")
-                self.update_status(f"价格获取失败: {str(e)}")
-                self.yes_price_label.config(text="Yes: 获取失败", foreground='red')
-                self.no_price_label.config(text="No: 获取失败", foreground='red')
-                self.root.after(1000, self.check_prices)
+                self.root.after(0, lambda: self.update_status(f"价格获取失败: {str(e)}"))
+                self.root.after(0, lambda: self.yes_price_label.config(text="Yes: 获取失败", foreground='red'))
+                self.root.after(0, lambda: self.no_price_label.config(text="No: 获取失败", foreground='red'))
 
         except Exception as e:
-            self.logger.error(f"检查价格失败: {str(e)}")
-            self.update_status(f"价检查错误: {str(e)}")
+            
             time.sleep(2)
+    # 添加新方法用于检查交易条件
+    def _check_trade_conditions(self, yes_price, no_price):
+        """在单独线程中检查交易条件"""
+        try:
+            # 执行所有交易检查函数
+            self.First_trade(yes_price, no_price)
+            self.Second_trade(yes_price, no_price)
+            self.Third_trade(yes_price, no_price)
+            self.Forth_trade(yes_price, no_price)
+            self.Sell_yes(yes_price, no_price)
+            self.Sell_no(yes_price, no_price)
+        except Exception as e:
+            self.logger.error(f"交易条件检查失败: {str(e)}")
 
     def check_balance(self):
         """获取Portfolio和Cash值"""
         try:
             if not self.driver:
                 raise Exception("check_balance浏览器连接丢失")
-            
-            # 等待页面完全加载
-            WebDriverWait(self.driver, 10).until(
-                lambda driver: driver.execute_script('return document.readyState') == 'complete'
-            )
-            
-            try:
-                # 获取Portfolio值
+            # 使用锁保护浏览器操作
+            with self.driver_lock:
+                # 等待页面完全加载
+                WebDriverWait(self.driver, 10).until(
+                    lambda driver: driver.execute_script('return document.readyState') == 'complete'
+                )
+                
                 try:
-                    portfolio_element = self.driver.find_element(By.XPATH, XPathConfig.PORTFOLIO_VALUE)
-                    portfolio_value = portfolio_element.text
+                    # 获取Portfolio值
+                    try:
+                        portfolio_element = self.driver.find_element(By.XPATH, XPathConfig.PORTFOLIO_VALUE)
+                        portfolio_value = portfolio_element.text
+                    except Exception as e:
+                        portfolio_element = self._find_element_with_retry(XPathConfig.PORTFOLIO_VALUE)
+                        portfolio_value = portfolio_element.text
+                    
+                    # 获取Cash值
+                    try:
+                        cash_element = self.driver.find_element(By.XPATH, XPathConfig.CASH_VALUE)
+                        cash_value = cash_element.text
+                    except Exception as e:
+                        cash_element = self._find_element_with_retry(XPathConfig.CASH_VALUE)
+                        cash_value = cash_element.text
+                    
+                    # 更新Portfolio和Cash显示 - 使用 after 方法确保在主线程中更新 UI
+                    self.root.after(0, lambda: self.portfolio_label.config(text=f"Portfolio: {portfolio_value}"))
+                    self.root.after(0, lambda: self.cash_label.config(text=f"Cash: {cash_value}"))
+                    
+                    # 新增触发条件：首次获取到Cash值时安排设置金额
+                    if not hasattr(self, 'cash_initialized'):
+                        self.cash_initialized = True
+                        self.root.after(1000, self.schedule_update_amount)  # 延迟1秒确保数据稳定
                 except Exception as e:
-                    portfolio_element = self._find_element_with_retry(XPathConfig.PORTFOLIO_VALUE)
-                    portfolio_value = portfolio_element.text
-                
-                # 获取Cash值
-                try:
-                    cash_element = self.driver.find_element(By.XPATH, XPathConfig.CASH_VALUE)
-                    cash_value = cash_element.text
-                except Exception as e:
-                    cash_element = self._find_element_with_retry(XPathConfig.CASH_VALUE)
-                    cash_value = cash_element.text
-                
-                # 更新Portfolio和Cash显示
-                self.portfolio_label.config(text=f"Portfolio: {portfolio_value}")
-                self.cash_label.config(text=f"Cash: {cash_value}")
-                
-                # 新增触发条件：首次获取到Cash值时安排设置金额
-                if not hasattr(self, 'cash_initialized'):
-                    self.cash_initialized = True
-                    self.root.after(1000, self.schedule_update_amount)  # 延迟1秒确保数据稳定
-                
-                # 新最后更新间
-                current_time = datetime.now().strftime('%H:%M:%S')
-                self.balance_update_label.config(text=f"最后更新: {current_time}")
-
-            except Exception as e:
-                self.logger.error(f"获取Portfolio和Cash失败: {str(e)}")
-                self.portfolio_label.config(text="Portfolio: 获取失败")
-                self.cash_label.config(text="Cash: 获取失败")
-                self.check_balance()
+                    self.logger.error(f"获取Portfolio和Cash失败: {str(e)}")
+                    self.root.after(0, lambda: self.portfolio_label.config(text="Portfolio: 获取失败"))
+                    self.root.after(0, lambda: self.cash_label.config(text="Cash: 获取失败"))
 
         except Exception as e:
             self.logger.error(f"检查资金失败: {str(e)}")
-            self.update_status(f"资金检查错误: {str(e)}")
+            self.root.after(0, lambda: self.update_status(f"资金检查错误: {str(e)}"))
             time.sleep(2)
 
     """以上代码执行了监控价格和获取 CASH 的值。从这里开始程序返回到第 810 行"""  
@@ -1284,19 +1285,28 @@ class CryptoTrader:
                     if not getattr(self, 'is_url_monitoring', False):
                         return
 
-                    # 监控逻辑...
-                    current_url = self.driver.current_url if self.driver else ""
-                    target_url = self.target_url
-                    
-                    if current_url != target_url:
-                        self.logger.warning(f"URL变更: {current_url} -> 恢复至 {target_url}")
-                        self.driver.get(target_url)
+                    # 使用线程执行可能耗时的浏览器操作，避免阻塞GUI
+                    def check_and_restore_url():
+                        try:
+                            current_url = self.driver.current_url if self.driver else ""
+                            target_url = self.target_url
+                            
+                            if current_url != target_url:
+                                self.logger.warning(f"URL变更: {current_url} -> 恢复至 {target_url}")
+                                # 使用线程执行耗时操作
+                                with self.driver_lock:
+                                    self.driver.get(target_url)
+                        except Exception as e:
+                            self.logger.error(f"URL恢复操作异常: {str(e)}")
+
+                    # 使用线程执行URL检查和恢复
+                    threading.Thread(target=check_and_restore_url, daemon=True).start()
 
                 except Exception as e:
                     self.logger.error(f"监控异常: {str(e)}")
                 finally:
                     if getattr(self, 'is_url_monitoring', False):
-                        self.url_check_timer = self.root.after(1000, _monitor)
+                        self.url_check_timer = self.root.after(3000, _monitor)
                     else:
                         self.url_check_timer = None
 
@@ -1513,37 +1523,72 @@ class CryptoTrader:
             self.click_accept_button()
 
     # 添加刷新方法
+   
     def refresh_page(self):
         """定时刷新页面"""
         try:
-            if self.running:
-                # 检查是否是第一次执行
-                if hasattr(self, 'first_refresh') and self.first_refresh:
-                    self.first_refresh = False
-                    self.logger.info("首次刷新页面,120秒后开始定时刷新")
-                    self.refresh_timer = self.root.after(120000, self.refresh_page)  # 120秒 = 120000毫秒
-                    return
+            if not self.running:
+                self.logger.info("监控已停止，取消页面刷新")
+                return
                 
-                if not self.trading:  # 仅在非交易状态执行刷新
-                    if self.driver:
-                            
-                        self.driver.refresh()
-                        self.logger.info("✅ 定时刷新成功")
-                    else:
-                        self.logger.error("refresh_page浏览器连接丢失")
-                else:
-                    self.logger.info("交易进行中，跳过本次刷新")
+            # 检查是否正在交易
+            if hasattr(self, 'is_trading') and self.is_trading:
+                self.logger.info("交易进行中，跳过本次刷新")
+                # 安排下一次刷新
+                self.refresh_timer = self.root.after(300000, self.refresh_page)  # 5分钟 = 300000毫秒
+                return
+            
+            # 检查是否正在执行其他重要操作
+            if hasattr(self, 'is_checking_prices') and self.is_checking_prices:
+                self.logger.info("正在检查价格，延迟页面刷新")
+                # 延迟30秒后再次尝试
+                self.refresh_timer = self.root.after(30000, self.refresh_page)
+                return
                 
-                # 无论是否执行刷新都安排下一次（确保循环持续）
-                self.refresh_timer = self.root.after(self.refresh_interval, self.refresh_page)
-            else:
-                self.logger.info("程序未运行，停止安排刷新")
-
+            # 添加日志以便调试
+            self.logger.info("准备执行页面刷新")
+            
+            # 使用线程执行刷新操作，避免阻塞主线程
+            def do_refresh():
+                try:
+                    start_time = time.time()
+                    self.logger.info("刷新线程开始执行")
+                    
+                    # 使用锁保护浏览器操作
+                    with self.driver_lock:
+                        # 设置页面加载超时
+                        self.driver.set_page_load_timeout(20)  # 减少超时时间
+                        try:
+                            # 使用更轻量级的方式刷新页面
+                            self.driver.execute_script("location.reload(true);")
+                            self.logger.info("使用JavaScript刷新页面成功")
+                        except Exception as js_e:
+                            self.logger.error(f"JavaScript刷新失败: {str(js_e)}")
+                            try:
+                                # 如果JavaScript刷新失败，尝试使用更简单的方法
+                                self.driver.get(self.driver.current_url)
+                                self.logger.info("使用get方法刷新页面成功")
+                            except Exception as e:
+                                self.logger.error(f"页面刷新失败: {str(e)}")
+                    
+                    elapsed = time.time() - start_time
+                    self.logger.info(f"页面刷新完成，耗时: {elapsed:.2f}秒")
+                    
+                except Exception as e:
+                    self.logger.error(f"刷新页面线程中出错: {str(e)}")
+            
+            # 启动刷新线程
+            refresh_thread = threading.Thread(target=do_refresh, daemon=True, name="RefreshThread")
+            refresh_thread.start()
+            
+            # 安排下一次刷新，增加间隔时间减少卡顿
+            self.refresh_timer = self.root.after(600000, self.refresh_page)  # 10分钟 = 600000毫秒
+            self.logger.info("已安排下一次页面刷新,间隔10分钟")
         except Exception as e:
-            self.logger.error(f"页面刷新失败: {str(e)}")
-            if self.running:
-                self.refresh_timer = self.root.after(self.refresh_interval, self.refresh_page)
-
+            self.logger.error(f"刷新页面调度失败: {str(e)}")
+            # 即使失败也要安排下一次刷新
+            self.refresh_timer = self.root.after(600000, self.refresh_page)
+        
     def stop_refresh_page(self):
         """停止页面刷新"""
         try:
@@ -1575,711 +1620,862 @@ class CryptoTrader:
                 self.refresh_timer = None
     """以上代码执行了登录操作的函数,直到第 1578 行,程序执行返回到 848 行"""               
     """以下代码是监控买卖条件及执行交易的函数,程序开始进入交易阶段,从 1400 行直到第 2500 行"""  
-    def First_trade(self):
+    # 修改 First_trade 方法，接收价格参数而不是重新获取
+    def First_trade(self, yes_price=None, no_price=None):
         try:
             self.trading = True  # 开始交易
-            # 获取当前Yes和No价格
-            prices = self.driver.execute_script("""
-                function getPrices() {
-                    const prices = {yes: null, no: null};
-                    const elements = document.getElementsByTagName('span');
-                    
-                    for (let el of elements) {
-                        const text = el.textContent.trim();
-                        if (text.includes('Yes') && text.includes('¢')) {
-                            const match = text.match(/(\\d+\\.?\\d*)¢/);
-                            if (match) prices.yes = parseFloat(match[1]);
-                        }
-                        if (text.includes('No') && text.includes('¢')) {
-                            const match = text.match(/(\\d+\\.?\\d*)¢/);
-                            if (match) prices.no = parseFloat(match[1]);
-                        }
-                    }
-                    return prices;
-                }
-                return getPrices();
-            """)
-                
-            if prices['yes'] is not None and prices['no'] is not None:
-                yes_price = float(prices['yes']) / 100
-                no_price = float(prices['no']) / 100
-                
-                # 获取Yes1和No1的目标价格
-                yes1_target = float(self.yes1_price_entry.get())
-                no1_target = float(self.no1_price_entry.get())
-                
-                # 检查Yes1价格匹配
-                if 0 <= (yes_price - yes1_target ) <= 0.02 and yes1_target > 0:
-                    while True:
-                        self.logger.info("Yes 1价格匹配,执行自动交易")
-                        # 执行现有的交易操作
-                        self.amount_yes1_button.event_generate('<Button-1>')
-                        time.sleep(0.5)
-                        self.buy_confirm_button.invoke()
-                        time.sleep(0.5)
-                        self._handle_metamask_popup()
-                        # 执行等待和刷新
-                        self.sleep_refresh("First_trade")
-                        if self.Verify_buy_yes():
-                            # 增加交易次数
-                            self.trade_count += 1
-                            # 发送交易邮件
-                            self.send_trade_email(
-                                trade_type="Buy Yes1",
-                                price=yes_price,
-                                amount=float(self.yes1_amount_entry.get()),
-                                trade_count=self.trade_count
-                            )
-                            # 重置Yes1和No1价格为0.00
-                            self.yes1_price_entry.delete(0, tk.END)
-                            self.yes1_price_entry.insert(0, "0.00")
-                            self.no1_price_entry.delete(0, tk.END)
-                            self.no1_price_entry.insert(0, "0.00")
-                                
-                            # 设置No2价格为默认值
-                            self.no2_price_entry = self.no_frame.grid_slaves(row=2, column=1)[0]
-                            self.no2_price_entry.delete(0, tk.END)
-                            self.no2_price_entry.insert(0, str(self.default_target_price))
-                            self.no2_price_entry.configure(foreground='red')  # 添加红色设置
-
-                            # 设置 Yes5和No5价格为0.85
-                            self.yes5_price_entry = self.yes_frame.grid_slaves(row=8, column=1)[0]
-                            self.yes5_price_entry.delete(0, tk.END)
-                            self.yes5_price_entry.insert(0, "0.85")
-                            self.yes5_price_entry.configure(foreground='red')  # 添加红色设置
-                            self.no5_price_entry = self.no_frame.grid_slaves(row=8, column=1)[0]
-                            self.no5_price_entry.delete(0, tk.END)
-                            self.no5_price_entry.insert(0, "0.85")
-                            self.no5_price_entry.configure(foreground='red')  # 添加红色设置
-                            self.logger.info("First_trade执行成功")
-                            break
-                        else:
-                            self.logger.warning("交易失败,等待2秒后重试")
-                            time.sleep(2)  # 添加延时避免过于频繁的重试
-
-                # 检查No1价格匹配
-                elif 0 <= (no_price - no1_target ) <= 0.02 and no1_target > 0:
-                    while True:
-                        self.logger.info("No 1价格匹配,执行自动交易") 
-                        # 执行现有的交易操作
-                        self.buy_no_button.invoke()
-                        time.sleep(0.5)
-                        self.amount_no1_button.event_generate('<Button-1>')
-                        time.sleep(0.5)
-                        self.buy_confirm_button.invoke()
-                        time.sleep(1)
-                        self._handle_metamask_popup()
-                        # 执行等待和刷新
-                        self.sleep_refresh("First_trade")
-
-                        if self.Verify_buy_no():
-                            # 增加交易次数
-                            self.trade_count += 1
-                            # 发送交易邮件
-                            self.send_trade_email(
-                                trade_type="Buy No1",
-                                price=no_price,
-                                amount=float(self.no1_amount_entry.get()),
-                                trade_count=self.trade_count
-                            )
-                            # 重置Yes1和No1价格为0.00
-                            self.yes1_price_entry.delete(0, tk.END)
-                            self.yes1_price_entry.insert(0, "0.00")
-                            self.no1_price_entry.delete(0, tk.END)
-                            self.no1_price_entry.insert(0, "0.00")
+            
+            # 如果没有传入价格参数，则获取当前价格
+            if yes_price is None or no_price is None:
+                with self.driver_lock:
+                    prices = self.driver.execute_script("""
+                        function getPrices() {
+                            const prices = {yes: null, no: null};
+                            const elements = document.getElementsByTagName('span');
                             
-                            # 设置Yes2价格为默认值
-                            self.yes2_price_entry = self.yes_frame.grid_slaves(row=2, column=1)[0]
-                            self.yes2_price_entry.delete(0, tk.END)
-                            self.yes2_price_entry.insert(0, str(self.default_target_price))
-                            self.yes2_price_entry.configure(foreground='red')  # 添加红色设置
-
-                            # 设置 Yes5和No5价格为0.85
-                            self.yes5_price_entry = self.yes_frame.grid_slaves(row=8, column=1)[0]
-                            self.yes5_price_entry.delete(0, tk.END)
-                            self.yes5_price_entry.insert(0, "0.85")
-                            self.yes5_price_entry.configure(foreground='red')  # 添加红色设置
-                            self.no5_price_entry = self.no_frame.grid_slaves(row=8, column=1)[0]
-                            self.no5_price_entry.delete(0, tk.END)
-                            self.no5_price_entry.insert(0, "0.85")
-                            self.no5_price_entry.configure(foreground='red')  # 添加红色设置
-                            self.logger.info("First_trade执行成功")
-                            break
-                        else:
-                            self.logger.warning("交易失败,等待2秒后重试")
-                            time.sleep(2)  # 添加延时避免过于频繁的重试    
+                            for (let el of elements) {
+                                const text = el.textContent.trim();
+                                if (text.includes('Yes') && text.includes('¢')) {
+                                    const match = text.match(/(\\d+\\.?\\d*)¢/);
+                                    if (match) prices.yes = parseFloat(match[1]);
+                                }
+                                if (text.includes('No') && text.includes('¢')) {
+                                    const match = text.match(/(\\d+\\.?\\d*)¢/);
+                                    if (match) prices.no = parseFloat(match[1]);
+                                }
+                            }
+                            return prices;
+                        }
+                        return getPrices();
+                    """)
+                    
+                    if prices['yes'] is not None and prices['no'] is not None:
+                        yes_price = float(prices['yes']) / 100
+                        no_price = float(prices['no']) / 100
+                    else:
+                        return
+            
+            # 获取Yes1和No1的目标价格
+            yes1_target = float(self.yes1_price_entry.get())
+            no1_target = float(self.no1_price_entry.get())
+            
+            # 检查Yes1价格匹配
+            if 0 <= (yes_price - yes1_target) <= 0.02 and yes1_target > 0:
+                self.logger.info("Yes 1价格匹配,执行自动交易")
+                # 创建新线程执行交易操作
+                threading.Thread(target=self._execute_yes1_trade, daemon=True).start()
+                    
+            # 检查No1价格匹配
+            elif 0 <= (no_price - no1_target) <= 0.02 and no1_target > 0:
+                self.logger.info("No 1价格匹配,执行自动交易")
+                # 创建新线程执行交易操作
+                threading.Thread(target=self._execute_no1_trade, daemon=True).start()
 
         except ValueError as e:
             self.logger.error(f"价格转换错误: {str(e)}")
         except Exception as e:
             self.logger.error(f"First_trade执行失败: {str(e)}")
-            self.update_status(f"First_trade执行失败: {str(e)}")
+            self.root.after(0, lambda: self.update_status(f"First_trade执行失败: {str(e)}"))
         finally:
             self.trading = False
 
-    def Second_trade(self):
-        """处理Yes2/No2的自动交易"""
+    # 添加执行Yes1交易的方法
+    def _execute_yes1_trade(self):
+        try:
+            max_attempts = 3
+            for attempt in range(max_attempts):
+                with self.driver_lock:
+                    # 执行现有的交易操作
+                    self.amount_yes1_button.event_generate('<Button-1>')
+                    time.sleep(0.5)
+                    self.buy_confirm_button.invoke()
+                    time.sleep(0.5)
+                    self._handle_metamask_popup()
+                    
+                # 执行等待和刷新
+                self.sleep_refresh("First_trade")
+                
+                if self.Verify_buy_yes():
+                    # 增加交易次数
+                    self.trade_count += 1
+                    # 发送交易邮件
+                    self.send_trade_email(
+                        trade_type="Buy Yes1",
+                        price=float(self.yes1_price_entry.get()),
+                        amount=float(self.yes1_amount_entry.get()),
+                        trade_count=self.trade_count
+                    )
+                    
+                    # 在主线程中更新UI
+                    self.root.after(0, self._update_after_yes1_trade)
+                    self.logger.info("First_trade执行成功")
+                    break
+                else:
+                    self.logger.warning(f"交易失败,尝试 {attempt+1}/{max_attempts}")
+                    time.sleep(2)  # 添加延时避免过于频繁的重试
+        except Exception as e:
+            self.logger.error(f"执行Yes1交易失败: {str(e)}")
+
+    # 添加Yes1交易后的UI更新方法
+    def _update_after_yes1_trade(self):
+        # 重置Yes1和No1价格为0.00
+        self.yes1_price_entry.delete(0, tk.END)
+        self.yes1_price_entry.insert(0, "0.00")
+        self.no1_price_entry.delete(0, tk.END)
+        self.no1_price_entry.insert(0, "0.00")
+            
+        # 设置No2价格为默认值
+        self.no2_price_entry = self.no_frame.grid_slaves(row=2, column=1)[0]
+        self.no2_price_entry.delete(0, tk.END)
+        self.no2_price_entry.insert(0, str(self.default_target_price))
+        self.no2_price_entry.configure(foreground='red')  # 添加红色设置
+
+        # 设置 Yes5和No5价格为0.85
+        self.yes5_price_entry = self.yes_frame.grid_slaves(row=8, column=1)[0]
+        self.yes5_price_entry.delete(0, tk.END)
+        self.yes5_price_entry.insert(0, "0.85")
+        self.yes5_price_entry.configure(foreground='red')  # 添加红色设置
+        self.no5_price_entry = self.no_frame.grid_slaves(row=8, column=1)[0]
+        self.no5_price_entry.delete(0, tk.END)
+        self.no5_price_entry.insert(0, "0.85")
+        self.no5_price_entry.configure(foreground='red')  # 添加红色设置
+
+        # 添加执行No1交易的方法
+    def _execute_no1_trade(self):
+        try:
+            max_attempts = 3
+            for attempt in range(max_attempts):
+                with self.driver_lock:
+                    # 执行现有的交易操作
+                    self.amount_no1_button.event_generate('<Button-1>')
+                    time.sleep(0.5)
+                    self.buy_confirm_button.invoke()
+                    time.sleep(0.5)
+                    self._handle_metamask_popup()
+                    
+                # 执行等待和刷新
+                self.sleep_refresh("First_trade")
+                
+                if self.Verify_buy_no():
+                    # 增加交易次数
+                    self.trade_count += 1
+                    # 发送交易邮件
+                    self.send_trade_email(
+                        trade_type="Buy No1",
+                        price=float(self.no1_price_entry.get()),
+                        amount=float(self.no1_amount_entry.get()),
+                        trade_count=self.trade_count
+                    )
+                    
+                    # 在主线程中更新UI
+                    self.root.after(0, self._update_after_no1_trade)
+                    self.logger.info("First_trade执行成功")
+                    break
+                else:
+                    self.logger.warning(f"交易失败,尝试 {attempt+1}/{max_attempts}")
+                    time.sleep(2)  # 添加延时避免过于频繁的重试
+        except Exception as e:
+            self.logger.error(f"执行No1交易失败: {str(e)}")
+
+    # 添加No1交易后的UI更新方法
+    def _update_after_no1_trade(self):
+        # 重置Yes1和No1价格为0.00
+        self.yes1_price_entry.delete(0, tk.END)
+        self.yes1_price_entry.insert(0, "0.00")
+        self.no1_price_entry.delete(0, tk.END)
+        self.no1_price_entry.insert(0, "0.00")
+            
+        # 设置Yes2价格为默认值
+        self.yes2_price_entry = self.yes_frame.grid_slaves(row=2, column=1)[0]
+        self.yes2_price_entry.delete(0, tk.END)
+        self.yes2_price_entry.insert(0, str(self.default_target_price))
+        self.yes2_price_entry.configure(foreground='red')  # 添加红色设置
+
+        # 设置 Yes5和No5价格为0.85
+        self.yes5_price_entry = self.yes_frame.grid_slaves(row=8, column=1)[0]
+        self.yes5_price_entry.delete(0, tk.END)
+        self.yes5_price_entry.insert(0, "0.85")
+        self.yes5_price_entry.configure(foreground='red')  # 添加红色设置
+        self.no5_price_entry = self.no_frame.grid_slaves(row=8, column=1)[0]
+        self.no5_price_entry.delete(0, tk.END)
+        self.no5_price_entry.insert(0, "0.85")
+        self.no5_price_entry.configure(foreground='red')  # 添加红色设置
+
+    # 修改 Second_trade 方法，接收价格参数而不是重新获取
+    def Second_trade(self, yes_price=None, no_price=None):
         try:
             self.trading = True  # 开始交易
-    
-            # 获取当前Yes和No价格
-            prices = self.driver.execute_script("""
-                function getPrices() {
-                    const prices = {yes: null, no: null};
-                    const elements = document.getElementsByTagName('span');
+            
+            # 如果没有传入价格参数，则获取当前价格
+            if yes_price is None or no_price is None:
+                with self.driver_lock:
+                    prices = self.driver.execute_script("""
+                        function getPrices() {
+                            const prices = {yes: null, no: null};
+                            const elements = document.getElementsByTagName('span');
+                            
+                            for (let el of elements) {
+                                const text = el.textContent.trim();
+                                if (text.includes('Yes') && text.includes('¢')) {
+                                    const match = text.match(/(\\d+\\.?\\d*)¢/);
+                                    if (match) prices.yes = parseFloat(match[1]);
+                                }
+                                if (text.includes('No') && text.includes('¢')) {
+                                    const match = text.match(/(\\d+\\.?\\d*)¢/);
+                                    if (match) prices.no = parseFloat(match[1]);
+                                }
+                            }
+                            return prices;
+                        }
+                        return getPrices();
+                    """)
                     
-                    for (let el of elements) {
-                        const text = el.textContent.trim();
-                        if (text.includes('Yes') && text.includes('¢')) {
-                            const match = text.match(/(\\d+\\.?\\d*)¢/);
-                            if (match) prices.yes = parseFloat(match[1]);
-                        }
-                        if (text.includes('No') && text.includes('¢')) {
-                            const match = text.match(/(\\d+\\.?\\d*)¢/);
-                            if (match) prices.no = parseFloat(match[1]);
-                        }
-                    }
-                    return prices;
-                }
-                return getPrices();
-            """)
+                    if prices['yes'] is not None and prices['no'] is not None:
+                        yes_price = float(prices['yes']) / 100
+                        no_price = float(prices['no']) / 100
+                    else:
+                        return
+            
+            # 获取Yes2和No2的目标价格
+            yes2_target = float(self.yes2_price_entry.get())
+            no2_target = float(self.no2_price_entry.get())
+            
+            # 检查Yes2价格匹配
+            if 0 <= (yes_price - yes2_target) <= 0.02 and yes2_target > 0:
+                self.logger.info("Yes 2价格匹配,执行自动交易")
+                # 创建新线程执行交易操作
+                threading.Thread(target=self._execute_yes2_trade, daemon=True).start()
+                    
+            # 检查No2价格匹配
+            elif 0 <= (no_price - no2_target) <= 0.02 and no2_target > 0:
+                self.logger.info("No 2价格匹配,执行自动交易")
+                # 创建新线程执行交易操作
+                threading.Thread(target=self._execute_no2_trade, daemon=True).start()
 
-            if prices['yes'] is not None and prices['no'] is not None:
-                yes_price = float(prices['yes']) / 100
-                no_price = float(prices['no']) / 100
-                
-                # 获Yes2和No2的价格输入框
-                yes2_target = float(self.yes2_price_entry.get())
-                no2_target = float(self.no2_price_entry.get())
-                
-                # 检查Yes2价格匹配
-                if 0 <= (yes_price - yes2_target ) <= 0.02 and yes2_target > 0:
-                    while True:
-                        self.logger.info("Yes 2价格匹配,执行自动交易")
-                        # 执行现有的交易操作
-                        self.amount_yes2_button.event_generate('<Button-1>')
-                        time.sleep(0.5)
-                        self.buy_confirm_button.invoke()
-                        time.sleep(1)
-                        self._handle_metamask_popup()
-                        # 执行等待和刷新
-                        self.sleep_refresh("Second_trade")
-                        if self.Verify_buy_yes():
-                            
-                            # 重置Yes2和No2价格为0.00
-                            self.yes2_price_entry.delete(0, tk.END)
-                            self.yes2_price_entry.insert(0, "0.00")
-                            self.no2_price_entry.delete(0, tk.END)
-                            self.no2_price_entry.insert(0, "0.00")
-                            
-                            # 设置No3价格为默认值
-                            self.no3_price_entry = self.no_frame.grid_slaves(row=4, column=1)[0]
-                            self.no3_price_entry.delete(0, tk.END)
-                            self.no3_price_entry.insert(0, str(self.default_target_price))
-                            self.no3_price_entry.configure(foreground='red')  # 添加红色设置
-                            
-                            # 增加交易次数
-                            self.trade_count += 1
-                            # 发送交易邮件
-                            self.send_trade_email(
-                                trade_type="Buy Yes 2",
-                                price=yes_price,
-                                amount=float(self.buy_yes_amount),
-                                trade_count=self.trade_count
-                            )
-                            self.logger.info("Second_trade执行成功")
-                            break
-                        else:
-                            self.logger.warning("交易失败,等待2秒后重试")
-                            time.sleep(2)  # 添加延时避免过于频繁的重试
-
-                # 检查No2价格匹配
-                elif 0 <= (no_price - no2_target ) <= 0.02 and no2_target > 0:
-                    while True:
-                        self.logger.info("No 2价格匹配,执行自动交易")
-                        
-                        # 执行现有的交易操作
-                        self.buy_no_button.invoke()
-                        time.sleep(0.5)
-                        self.amount_no2_button.event_generate('<Button-1>')
-                        time.sleep(0.5)
-                        self.buy_confirm_button.invoke()
-                        time.sleep(1)
-                        self._handle_metamask_popup()
-                        # 执行等待和刷新
-                        self.sleep_refresh("Second_trade")
-                        if self.Verify_buy_no():
-
-                            # 重置Yes2和No2价格为0.00
-                            self.yes2_price_entry.delete(0, tk.END)
-                            self.yes2_price_entry.insert(0, "0.00")
-                            self.no2_price_entry.delete(0, tk.END)
-                            self.no2_price_entry.insert(0, "0.00")
-                            
-                            # 设置Yes3价格为默认值
-                            self.yes3_price_entry = self.yes_frame.grid_slaves(row=4, column=1)[0]
-                            self.yes3_price_entry.delete(0, tk.END)
-                            self.yes3_price_entry.insert(0, str(self.default_target_price))
-                            self.yes3_price_entry.configure(foreground='red')  # 添加红色设置
-                            
-                            # 增加交易次数
-                            self.trade_count += 1
-                            # 发送交易邮件
-                            self.send_trade_email(
-                                trade_type="Buy No 2",
-                                price=no_price,
-                                amount=float(self.buy_no_amount),
-                                trade_count=self.trade_count
-                            )
-                            self.logger.info("Second_trade执行成功")
-                            break
-                        else:
-                            self.logger.warning("交易失败,等待2秒后重试")
-                            time.sleep(2)  # 添加延时避免过于频繁的重试
         except ValueError as e:
             self.logger.error(f"价格转换错误: {str(e)}")
         except Exception as e:
             self.logger.error(f"Second_trade执行失败: {str(e)}")
-            self.update_status(f"Second_trade执行失败: {str(e)}")
+            self.root.after(0, lambda: self.update_status(f"Second_trade执行失败: {str(e)}"))
         finally:
             self.trading = False
 
-    def Third_trade(self):
-        """处理Yes3/No3的自动交易"""
+    # 添加执行Yes2交易的方法
+    def _execute_yes2_trade(self):
+        try:
+            max_attempts = 3
+            for attempt in range(max_attempts):
+                with self.driver_lock:
+                    # 执行现有的交易操作
+                    self.amount_yes2_button.event_generate('<Button-1>')
+                    time.sleep(0.5)
+                    self.buy_confirm_button.invoke()
+                    time.sleep(0.5)
+                    self._handle_metamask_popup()
+                    
+                # 执行等待和刷新
+                self.sleep_refresh("Second_trade")
+                
+                if self.Verify_buy_yes():
+                    # 增加交易次数
+                    self.trade_count += 1
+                    # 发送交易邮件
+                    self.send_trade_email(
+                        trade_type="Buy Yes2",
+                        price=float(self.yes2_price_entry.get()),
+                        amount=float(self.yes2_amount_entry.get()),
+                        trade_count=self.trade_count
+                    )
+                    
+                    # 在主线程中更新UI
+                    self.root.after(0, self._update_after_yes2_trade)
+                    self.logger.info("Second_trade执行成功")
+                    break
+                else:
+                    self.logger.warning(f"交易失败,尝试 {attempt+1}/{max_attempts}")
+                    time.sleep(2)  # 添加延时避免过于频繁的重试
+        except Exception as e:
+            self.logger.error(f"执行Yes2交易失败: {str(e)}")
+
+    # 添加Yes2交易后的UI更新方法
+    def _update_after_yes2_trade(self):
+        # 重置Yes2和No2价格为0.00
+        self.yes2_price_entry.delete(0, tk.END)
+        self.yes2_price_entry.insert(0, "0.00")
+        self.no2_price_entry.delete(0, tk.END)
+        self.no2_price_entry.insert(0, "0.00")
+            
+        # 设置No3价格为默认值
+        self.no3_price_entry = self.no_frame.grid_slaves(row=2, column=1)[0]
+        self.no3_price_entry.delete(0, tk.END)
+        self.no3_price_entry.insert(0, str(self.default_target_price))
+        self.no3_price_entry.configure(foreground='red')  # 添加红色设置
+
+        # 添加执行No2交易的方法
+    def _execute_no2_trade(self):
+        try:
+            max_attempts = 3
+            for attempt in range(max_attempts):
+                with self.driver_lock:
+                    # 执行现有的交易操作
+                    self.amount_no2_button.event_generate('<Button-1>')
+                    time.sleep(0.5)
+                    self.buy_confirm_button.invoke()
+                    time.sleep(0.5)
+                    self._handle_metamask_popup()
+                    
+                # 执行等待和刷新
+                self.sleep_refresh("Second_trade")
+                
+                if self.Verify_buy_no():
+                    # 增加交易次数
+                    self.trade_count += 1
+                    # 发送交易邮件
+                    self.send_trade_email(
+                        trade_type="Buy No2",
+                        price=float(self.no2_price_entry.get()),
+                        amount=float(self.no2_amount_entry.get()),
+                        trade_count=self.trade_count
+                    )
+                    
+                    # 在主线程中更新UI
+                    self.root.after(0, self._update_after_no2_trade)
+                    self.logger.info("Second_trade执行成功")
+                    break
+                else:
+                    self.logger.warning(f"交易失败,尝试 {attempt+1}/{max_attempts}")
+                    time.sleep(2)  # 添加延时避免过于频繁的重试
+        except Exception as e:
+            self.logger.error(f"执行No2交易失败: {str(e)}")
+
+    # 添加No2交易后的UI更新方法
+    def _update_after_no2_trade(self):
+        # 重置Yes2和No2价格为0.00
+        self.yes2_price_entry.delete(0, tk.END)
+        self.yes2_price_entry.insert(0, "0.00")
+        self.no2_price_entry.delete(0, tk.END)
+        self.no2_price_entry.insert(0, "0.00")
+            
+        # 设置Yes3价格为默认值
+        self.yes3_price_entry = self.yes_frame.grid_slaves(row=2, column=1)[0]
+        self.yes3_price_entry.delete(0, tk.END)
+        self.yes3_price_entry.insert(0, str(self.default_target_price))
+        self.yes3_price_entry.configure(foreground='red')  # 添加红色设置
+
+
+    # 修改 Third_trade 方法，接收价格参数而不是重新获取
+    def Third_trade(self, yes_price=None, no_price=None):
         try:
             self.trading = True  # 开始交易
-
-            # 获取当前Yes和No价格
-            prices = self.driver.execute_script("""
-                function getPrices() {
-                    const prices = {yes: null, no: null};
-                    const elements = document.getElementsByTagName('span');
+            
+            # 如果没有传入价格参数，则获取当前价格
+            if yes_price is None or no_price is None:
+                with self.driver_lock:
+                    prices = self.driver.execute_script("""
+                        function getPrices() {
+                            const prices = {yes: null, no: null};
+                            const elements = document.getElementsByTagName('span');
+                            
+                            for (let el of elements) {
+                                const text = el.textContent.trim();
+                                if (text.includes('Yes') && text.includes('¢')) {
+                                    const match = text.match(/(\\d+\\.?\\d*)¢/);
+                                    if (match) prices.yes = parseFloat(match[1]);
+                                }
+                                if (text.includes('No') && text.includes('¢')) {
+                                    const match = text.match(/(\\d+\\.?\\d*)¢/);
+                                    if (match) prices.no = parseFloat(match[1]);
+                                }
+                            }
+                            return prices;
+                        }
+                        return getPrices();
+                    """)
                     
-                    for (let el of elements) {
-                        const text = el.textContent.trim();
-                        if (text.includes('Yes') && text.includes('¢')) {
-                            const match = text.match(/(\\d+\\.?\\d*)¢/);
-                            if (match) prices.yes = parseFloat(match[1]);
-                        }
-                        if (text.includes('No') && text.includes('¢')) {
-                            const match = text.match(/(\\d+\\.?\\d*)¢/);
-                            if (match) prices.no = parseFloat(match[1]);
-                        }
-                    }
-                    return prices;
-                }
-                return getPrices();
-            """)
-                
-            if prices['yes'] is not None and prices['no'] is not None:
-                yes_price = float(prices['yes']) / 100
-                no_price = float(prices['no']) / 100
-                
-                # 获取Yes3和No3的价格输入框
-                yes3_target = float(self.yes3_price_entry.get())
-                no3_target = float(self.no3_price_entry.get())
-                
-                # 检查Yes3价格匹配
-                if 0 <= (yes_price - yes3_target ) <= 0.02 and yes3_target > 0:
-                    while True:
-                        self.logger.info("Yes 3价格匹配,执行自动交易")
-                        # 执行交易操作
-                        self.amount_yes3_button.event_generate('<Button-1>')
-                        time.sleep(0.5)
-                        self.buy_confirm_button.invoke()
-                        time.sleep(1)
-                        self._handle_metamask_popup()
-                        # 执行等待和刷新
-                        self.sleep_refresh("Third_trade")
-                        if self.Verify_buy_yes():
+                    if prices['yes'] is not None and prices['no'] is not None:
+                        yes_price = float(prices['yes']) / 100
+                        no_price = float(prices['no']) / 100
+                    else:
+                        return
+            
+            # 获取Yes3和No3的目标价格
+            yes3_target = float(self.yes3_price_entry.get())
+            no3_target = float(self.no3_price_entry.get())
+            
+            # 检查Yes3价格匹配
+            if 0 <= (yes_price - yes3_target) <= 0.02 and yes3_target > 0:
+                self.logger.info("Yes 3价格匹配,执行自动交易")
+                # 创建新线程执行交易操作
+                threading.Thread(target=self._execute_yes3_trade, daemon=True).start()
+                    
+            # 检查No3价格匹配
+            elif 0 <= (no_price - no3_target) <= 0.02 and no3_target > 0:
+                self.logger.info("No 3价格匹配,执行自动交易")
+                # 创建新线程执行交易操作
+                threading.Thread(target=self._execute_no3_trade, daemon=True).start()
 
-                            # 重置Yes3和No3价格为0.00
-                            self.yes3_price_entry.delete(0, tk.END)
-                            self.yes3_price_entry.insert(0, "0.00")
-                            self.no3_price_entry.delete(0, tk.END)
-                            self.no3_price_entry.insert(0, "0.00")
-                            
-                            # 设置No4价格为默认值
-                            self.no4_price_entry = self.no_frame.grid_slaves(row=6, column=1)[0]
-                            self.no4_price_entry.delete(0, tk.END)
-                            self.no4_price_entry.insert(0, str(self.default_target_price))
-                            self.no4_price_entry.configure(foreground='red')  # 添加红色设置
-
-                            # 增加交易次数
-                            self.trade_count += 1
-                            # 发送交易邮件
-                            self.send_trade_email(
-                                trade_type="Buy Yes 3",
-                                price=yes_price,
-                                amount=float(self.buy_yes_amount),
-                                trade_count=self.trade_count
-                            )   
-                            self.logger.info("Third_trade执行成功")
-                            break
-                        else:
-                            self.logger.warning("交易失败,等待2秒后重试")
-                            time.sleep(2)  # 添加延时避免过于频繁的重试
-                # 检查No3价格匹配
-                elif 0 <= (no_price - no3_target ) <= 0.02 and no3_target > 0:
-                    while True:
-                        self.logger.info("No 3价格匹配,执行自动交易")
-                        # 执行交易操作
-                        self.buy_no_button.invoke()
-                        time.sleep(0.5)
-                        self.amount_no3_button.event_generate('<Button-1>')
-                        time.sleep(0.5)
-                        self.buy_confirm_button.invoke()
-                        time.sleep(1)
-                        self._handle_metamask_popup()
-                        # 执行等待和刷新
-                        self.sleep_refresh("Third_trade")
-                        if self.Verify_buy_no():
-                            
-                            # 重置Yes3和No3价格为0.00
-                            self.yes3_price_entry.delete(0, tk.END)
-                            self.yes3_price_entry.insert(0, "0.00")
-                            self.no3_price_entry.delete(0, tk.END)
-                            self.no3_price_entry.insert(0, "0.00")
-                            
-                            # 设置Yes4价格为默认值
-                            self.yes4_price_entry = self.yes_frame.grid_slaves(row=6, column=1)[0]
-                            self.yes4_price_entry.delete(0, tk.END)
-                            self.yes4_price_entry.insert(0, str(self.default_target_price))
-                            self.yes4_price_entry.configure(foreground='red')  # 添加红色设置
-                        
-                            # 增加交易次数
-                            self.trade_count += 1
-                            # 发送交易邮件
-                            self.send_trade_email(
-                                trade_type="Buy No 3",
-                                price=no_price,
-                                amount=float(self.buy_no_amount),
-                                trade_count=self.trade_count
-                            )
-                            self.logger.info("Third_trade执行成功")
-                            break
-                        else:
-                            self.logger.warning("交易失败,等待2秒后重试")
-                            time.sleep(2)  # 添加延时避免过于频繁的重试
         except ValueError as e:
             self.logger.error(f"价格转换错误: {str(e)}")
         except Exception as e:
             self.logger.error(f"Third_trade执行失败: {str(e)}")
-            self.update_status(f"Third_trade执行失败: {str(e)}")
+            self.root.after(0, lambda: self.update_status(f"Third_trade执行失败: {str(e)}"))
         finally:
             self.trading = False
 
-    def Forth_trade(self):
-        """处理Yes4/No4的自动交易"""
+    # 添加执行Yes3交易的方法
+    def _execute_yes3_trade(self):
+        try:
+            max_attempts = 3
+            for attempt in range(max_attempts):
+                with self.driver_lock:
+                    # 执行现有的交易操作
+                    self.amount_yes3_button.event_generate('<Button-1>')
+                    time.sleep(0.5)
+                    self.buy_confirm_button.invoke()
+                    time.sleep(0.5)
+                    self._handle_metamask_popup()
+                    
+                # 执行等待和刷新
+                self.sleep_refresh("Third_trade")
+                
+                if self.Verify_buy_yes():
+                    # 增加交易次数
+                    self.trade_count += 1
+                    # 发送交易邮件
+                    self.send_trade_email(
+                        trade_type="Buy Yes3",
+                        price=float(self.yes3_price_entry.get()),
+                        amount=float(self.yes3_amount_entry.get()),
+                        trade_count=self.trade_count
+                    )
+                    
+                    # 在主线程中更新UI
+                    self.root.after(0, self._update_after_yes3_trade)
+                    self.logger.info("Third_trade执行成功")
+                    break
+                else:
+                    self.logger.warning(f"交易失败,尝试 {attempt+1}/{max_attempts}")
+                    time.sleep(2)  # 添加延时避免过于频繁的重试
+        except Exception as e:
+            self.logger.error(f"执行Yes2交易失败: {str(e)}")
+
+    # 添加Yes3交易后的UI更新方法
+    def _update_after_yes3_trade(self):
+        # 重置Yes3和No3价格为0.00
+        self.yes3_price_entry.delete(0, tk.END)
+        self.yes3_price_entry.insert(0, "0.00")
+        self.no3_price_entry.delete(0, tk.END)
+        self.no3_price_entry.insert(0, "0.00")
+            
+        # 设置No4价格为默认值
+        self.no4_price_entry = self.no_frame.grid_slaves(row=2, column=1)[0]
+        self.no4_price_entry.delete(0, tk.END)
+        self.no4_price_entry.insert(0, str(self.default_target_price))
+        self.no4_price_entry.configure(foreground='red')  # 添加红色设置
+
+        # 添加执行No3交易的方法
+    def _execute_no3_trade(self):
+        try:
+            max_attempts = 3
+            for attempt in range(max_attempts):
+                with self.driver_lock:
+                    # 执行现有的交易操作
+                    self.amount_no3_button.event_generate('<Button-1>')
+                    time.sleep(0.5)
+                    self.buy_confirm_button.invoke()
+                    time.sleep(0.5)
+                    self._handle_metamask_popup()
+                    
+                # 执行等待和刷新
+                self.sleep_refresh("Third_trade")
+                
+                if self.Verify_buy_no():
+                    # 增加交易次数
+                    self.trade_count += 1
+                    # 发送交易邮件
+                    self.send_trade_email(
+                        trade_type="Buy No3",
+                        price=float(self.no3_price_entry.get()),
+                        amount=float(self.no3_amount_entry.get()),
+                        trade_count=self.trade_count
+                    )
+                    
+                    # 在主线程中更新UI
+                    self.root.after(0, self._update_after_no3_trade)
+                    self.logger.info("Third_trade执行成功")
+                    break
+                else:
+                    self.logger.warning(f"交易失败,尝试 {attempt+1}/{max_attempts}")
+                    time.sleep(2)  # 添加延时避免过于频繁的重试
+        except Exception as e:
+            self.logger.error(f"执行No3交易失败: {str(e)}")
+
+    # 添加No3交易后的UI更新方法
+    def _update_after_no3_trade(self):
+        # 重置Yes3和No3价格为0.00
+        self.yes3_price_entry.delete(0, tk.END)
+        self.yes3_price_entry.insert(0, "0.00")
+        self.no3_price_entry.delete(0, tk.END)
+        self.no2_price_entry.insert(0, "0.00")
+            
+        # 设置Yes4价格为默认值
+        self.yes4_price_entry = self.yes_frame.grid_slaves(row=2, column=1)[0]
+        self.yes4_price_entry.delete(0, tk.END)
+        self.yes4_price_entry.insert(0, str(self.default_target_price))
+        self.yes4_price_entry.configure(foreground='red')  # 添加红色设置
+
+
+    # 修改 Forth_trade 方法，接收价格参数而不是重新获取
+    def Forth_trade(self, yes_price=None, no_price=None):
         try:
             self.trading = True  # 开始交易
-
-            # 获取当前Yes和No价格
-            prices = self.driver.execute_script("""
-                function getPrices() {
-                    const prices = {yes: null, no: null};
-                    const elements = document.getElementsByTagName('span');
+            
+            # 如果没有传入价格参数，则获取当前价格
+            if yes_price is None or no_price is None:
+                with self.driver_lock:
+                    prices = self.driver.execute_script("""
+                        function getPrices() {
+                            const prices = {yes: null, no: null};
+                            const elements = document.getElementsByTagName('span');
+                            
+                            for (let el of elements) {
+                                const text = el.textContent.trim();
+                                if (text.includes('Yes') && text.includes('¢')) {
+                                    const match = text.match(/(\\d+\\.?\\d*)¢/);
+                                    if (match) prices.yes = parseFloat(match[1]);
+                                }
+                                if (text.includes('No') && text.includes('¢')) {
+                                    const match = text.match(/(\\d+\\.?\\d*)¢/);
+                                    if (match) prices.no = parseFloat(match[1]);
+                                }
+                            }
+                            return prices;
+                        }
+                        return getPrices();
+                    """)
                     
-                    for (let el of elements) {
-                        const text = el.textContent.trim();
-                        if (text.includes('Yes') && text.includes('¢')) {
-                            const match = text.match(/(\\d+\\.?\\d*)¢/);
-                            if (match) prices.yes = parseFloat(match[1]);
-                        }
-                        if (text.includes('No') && text.includes('¢')) {
-                            const match = text.match(/(\\d+\\.?\\d*)¢/);
-                            if (match) prices.no = parseFloat(match[1]);
-                        }
-                    }
-                    return prices;
-                }
-                return getPrices();
-            """)
-                
-            if prices['yes'] is not None and prices['no'] is not None:
-                yes_price = float(prices['yes']) / 100
-                no_price = float(prices['no']) / 100
-                
-                # 获取Yes4和No4的价格输入框
-                yes4_target = float(self.yes4_price_entry.get())
-                no4_target = float(self.no4_price_entry.get())
-                
-                # 检查Yes4价格匹配
-                if 0 <= (yes_price - yes4_target ) <= 0.02 and yes4_target > 0:
-                    while True:
-                        self.logger.info("Yes 4价格匹配,执行自动交易")
-                        # 执行交易操作
-                        self.amount_yes4_button.event_generate('<Button-1>')
-                        time.sleep(0.5)
-                        self.buy_confirm_button.invoke()
-                        time.sleep(1)
-                        self._handle_metamask_popup()
-                        # 执行等待和刷新
-                        self.sleep_refresh("Forth_trade")
-                        if self.Verify_buy_yes():
+                    if prices['yes'] is not None and prices['no'] is not None:
+                        yes_price = float(prices['yes']) / 100
+                        no_price = float(prices['no']) / 100
+                    else:
+                        return
+            
+            # 获取Yes4和No4的目标价格
+            yes4_target = float(self.yes4_price_entry.get())
+            no4_target = float(self.no4_price_entry.get())
+            
+            # 检查Yes4价格匹配
+            if 0 <= (yes_price - yes4_target) <= 0.02 and yes4_target > 0:
+                self.logger.info("Yes 4价格匹配,执行自动交易")
+                # 创建新线程执行交易操作
+                threading.Thread(target=self._execute_yes4_trade, daemon=True).start()
+                    
+            # 检查No4价格匹配
+            elif 0 <= (no_price - no4_target) <= 0.02 and no4_target > 0:
+                self.logger.info("No 4价格匹配,执行自动交易")
+                # 创建新线程执行交易操作
+                threading.Thread(target=self._execute_no4_trade, daemon=True).start()
 
-                            # 重置Yes4和No4价格为0.00
-                            self.yes4_price_entry.delete(0, tk.END)
-                            self.yes4_price_entry.insert(0, "0.00")
-                            self.no4_price_entry.delete(0, tk.END)
-                            self.no4_price_entry.insert(0, "0.00")
-
-                            """当买了 4次后预防第 5 次反水，所以价格到了 50 时就平仓，然后再自动开"""
-                            # 设置 Yes5和No5价格为0.85
-                            self.yes5_price_entry = self.yes_frame.grid_slaves(row=8, column=1)[0]
-                            self.yes5_price_entry.delete(0, tk.END)
-                            self.yes5_price_entry.insert(0, "0.85")
-                            self.yes5_price_entry.configure(foreground='red')  # 添加红色设置
-                            self.no5_price_entry = self.no_frame.grid_slaves(row=8, column=1)[0]
-                            self.no5_price_entry.delete(0, tk.END)
-                            self.no5_price_entry.insert(0, "0.5")
-                            self.no5_price_entry.configure(foreground='red')  # 添加红色设置
-                            # 增加交易次数
-                            self.trade_count += 1
-                            # 发送交易邮件
-                            self.send_trade_email(
-                                trade_type="Buy Yes 4",
-                                price=yes_price,
-                                amount=float(self.buy_yes_amount),
-                                trade_count=self.trade_count
-                            )
-                            self.logger.info("Forth_trade执行成功")
-                            break
-                        else:
-                            self.logger.warning("交易失败,等待2秒后重试")
-                            time.sleep(2)  # 添加延时避免过于频繁的重试
-                # 检查No4价格匹配
-                elif 0 <= (no_price - no4_target ) <= 0.02 and no4_target > 0:
-                    while True:
-                        self.logger.info("No 4价格匹配,执行自动交易")
-                        # 执行交易操作
-                        self.buy_no_button.invoke()
-                        time.sleep(0.5)
-                        self.amount_no4_button.event_generate('<Button-1>')
-                        time.sleep(0.5)
-                        self.buy_confirm_button.invoke()
-                        time.sleep(1)
-                        self._handle_metamask_popup()
-                        # 执行等待和刷新
-                        self.sleep_refresh("Forth_trade")
-                        if self.Verify_buy_no():
-                            # 重置Yes4和No4价格为0.00
-                            self.yes4_price_entry.delete(0, tk.END)
-                            self.yes4_price_entry.insert(0, "0.00")
-                            self.no4_price_entry.delete(0, tk.END)
-                            self.no4_price_entry.insert(0, "0.00")
-
-                            """当买了 4次后预防第 5 次反水，所以价格到了 50 时就平仓，然后再自动开"""
-                            # 设置 Yes5和No5价格为0.85
-                            self.yes5_price_entry = self.yes_frame.grid_slaves(row=8, column=1)[0]
-                            self.yes5_price_entry.delete(0, tk.END)
-                            self.yes5_price_entry.insert(0, "0.5")
-                            self.yes5_price_entry.configure(foreground='red')  # 添加红色设置
-                            self.no5_price_entry = self.no_frame.grid_slaves(row=8, column=1)[0]
-                            self.no5_price_entry.delete(0, tk.END)
-                            self.no5_price_entry.insert(0, "0.85")
-                            self.no5_price_entry.configure(foreground='red')  # 添加红色设置
-                            # 增加交易次数
-                            self.trade_count += 1
-                            # 发送交易邮件
-                            self.send_trade_email(
-                                trade_type="Buy No4",
-                                price=no_price,
-                                amount=float(self.buy_no_amount),
-                                trade_count=self.trade_count
-                            )
-                            self.logger.info("Forth_trade执行成功")
-                            break
-                        else:
-                            self.logger.warning("交易失败,等待2秒后重试")
-                            time.sleep(2)  # 添加延时避免过于频繁的重试
         except ValueError as e:
             self.logger.error(f"价格转换错误: {str(e)}")
         except Exception as e:
             self.logger.error(f"Forth_trade执行失败: {str(e)}")
-            self.update_status(f"Forth_trade执行失败: {str(e)}")
+            self.root.after(0, lambda: self.update_status(f"Forth_trade执行失败: {str(e)}"))
         finally:
             self.trading = False
 
-    def Sell_yes(self):
-        """当YES价格等于实时Yes价格时自动卖出"""
+    # 添加执行Yes4交易的方法
+    def _execute_yes4_trade(self):
+        try:
+            max_attempts = 3
+            for attempt in range(max_attempts):
+                with self.driver_lock:
+                    # 执行现有的交易操作
+                    self.amount_yes4_button.event_generate('<Button-1>')
+                    time.sleep(0.5)
+                    self.buy_confirm_button.invoke()
+                    time.sleep(0.5)
+                    self._handle_metamask_popup()
+                    
+                # 执行等待和刷新
+                self.sleep_refresh("Forth_trade")
+                
+                if self.Verify_buy_yes():
+                    # 增加交易次数
+                    self.trade_count += 1
+                    # 发送交易邮件
+                    self.send_trade_email(
+                        trade_type="Buy Yes4",
+                        price=float(self.yes4_price_entry.get()),
+                        amount=float(self.yes4_amount_entry.get()),
+                        trade_count=self.trade_count
+                    )
+                    
+                    # 在主线程中更新UI
+                    self.root.after(0, self._update_after_yes4_trade)
+                    self.logger.info("Forth_trade执行成功")
+                    break
+                else:
+                    self.logger.warning(f"交易失败,尝试 {attempt+1}/{max_attempts}")
+                    time.sleep(2)  # 添加延时避免过于频繁的重试
+        except Exception as e:
+            self.logger.error(f"执行Yes4交易失败: {str(e)}")
+
+    # 添加Yes4交易后的UI更新方法
+    def _update_after_yes4_trade(self):
+        # 重置Yes4和No4价格为0.00
+        self.yes4_price_entry.delete(0, tk.END)
+        self.yes4_price_entry.insert(0, "0.00")
+        self.no4_price_entry.delete(0, tk.END)
+        self.no4_price_entry.insert(0, "0.00")
+            
+        """当买了 4次后预防第 5 次反水，所以价格到了 50 时就平仓，然后再自动开"""
+        # 设置 Yes5和No5价格为0.85
+        self.yes5_price_entry = self.yes_frame.grid_slaves(row=8, column=1)[0]
+        self.yes5_price_entry.delete(0, tk.END)
+        self.yes5_price_entry.insert(0, "0.85")
+        self.yes5_price_entry.configure(foreground='red')  # 添加红色设置
+        self.no5_price_entry = self.no_frame.grid_slaves(row=8, column=1)[0]
+        self.no5_price_entry.delete(0, tk.END)
+        self.no5_price_entry.insert(0, "0.5")
+        self.no5_price_entry.configure(foreground='red')  # 添加红色设置
+
+        # 添加执行No4交易的方法
+    def _execute_no4_trade(self):
+        try:
+            max_attempts = 3
+            for attempt in range(max_attempts):
+                with self.driver_lock:
+                    # 执行现有的交易操作
+                    self.amount_no4_button.event_generate('<Button-1>')
+                    time.sleep(0.5)
+                    self.buy_confirm_button.invoke()
+                    time.sleep(0.5)
+                    self._handle_metamask_popup()
+                    
+                # 执行等待和刷新
+                self.sleep_refresh("Forth_trade")
+                
+                if self.Verify_buy_no():
+                    # 增加交易次数
+                    self.trade_count += 1
+                    # 发送交易邮件
+                    self.send_trade_email(
+                        trade_type="Buy No4",
+                        price=float(self.no4_price_entry.get()),
+                        amount=float(self.no4_amount_entry.get()),
+                        trade_count=self.trade_count
+                    )
+                    
+                    # 在主线程中更新UI
+                    self.root.after(0, self._update_after_no4_trade)
+                    self.logger.info("Forth_trade执行成功")
+                    break
+                else:
+                    self.logger.warning(f"交易失败,尝试 {attempt+1}/{max_attempts}")
+                    time.sleep(2)  # 添加延时避免过于频繁的重试
+        except Exception as e:
+            self.logger.error(f"执行No4交易失败: {str(e)}")
+
+    # 添加No4交易后的UI更新方法
+    def _update_after_no4_trade(self):
+        # 重置Yes4和No4价格为0.00
+        self.yes4_price_entry.delete(0, tk.END)
+        self.yes4_price_entry.insert(0, "0.00")
+        self.no4_price_entry.delete(0, tk.END)
+        self.no4_price_entry.insert(0, "0.00")
+            
+        """当买了 4次后预防第 5 次反水，所以价格到了 50 时就平仓，然后再自动开"""
+        # 设置 Yes5和No5价格为0.85
+        self.yes5_price_entry = self.yes_frame.grid_slaves(row=8, column=1)[0]
+        self.yes5_price_entry.delete(0, tk.END)
+        self.yes5_price_entry.insert(0, "0.5")
+        self.yes5_price_entry.configure(foreground='red')  # 添加红色设置
+        self.no5_price_entry = self.no_frame.grid_slaves(row=8, column=1)[0]
+        self.no5_price_entry.delete(0, tk.END)
+        self.no5_price_entry.insert(0, "0.85")
+        self.no5_price_entry.configure(foreground='red')  # 添加红色设置
+
+    def Sell_yes(self, yes_price=None, no_price=None):
+        """当YES5价格等于实时Yes价格时自动卖出"""
+        self.trading = True  # 开始交易 
         try:
             if not self.driver:
                 raise Exception("Sell_yes浏览器连接丢失")
-            self.trading = True  # 开始交易 
-            
-            # 获取当前Yes价格
-            prices = self.driver.execute_script("""
-                function getPrices() {
-                    const prices = {yes: null, no: null};
-                    const elements = document.getElementsByTagName('span');
-                    
-                    for (let el of elements) {
-                        const text = el.textContent.trim();
-                        if (text.includes('Yes') && text.includes('¢')) {
-                            const match = text.match(/(\\d+\\.?\\d*)¢/);
-                            if (match) prices.yes = parseFloat(match[1]);
-                        }
-                        if (text.includes('No') && text.includes('¢')) {
-                            const match = text.match(/(\\d+\\.?\\d*)¢/);
-                            if (match) prices.no = parseFloat(match[1]);
-                        }
-                    }
-                    return prices;
-                }
-                return getPrices();
-            """)
-                
-            if prices['yes'] is not None:
-                yes_price = float(prices['yes']) / 100
-                
-                # 获取Yes5价格
-                yes5_target = float(self.yes5_price_entry.get())
-                
-                # 检查Yes5价格匹配
-                if 0 <= (yes_price - yes5_target) <= 0.05 and yes5_target > 0:
-                    self.logger.info("Yes 5价格匹配,执行自动卖出")
-                    
-                    # 执行卖出YES操作
-                    if self.only_sell_yes():
-                        self.logger.info("卖完 YES 后，检查是否需要卖出 NO")
-                        
-                        # 检查是否有NO持仓，最多检查3次
-                        max_retries = 2
-                        found_no = False
-                        
-                        for i in range(max_retries):
-                            try:
-                                no_position = self.find_position_label_no()
-                                if no_position == "No":
-                                    self.logger.info("发现NO持仓,执行卖出")
-                                    self.only_sell_no()
-                                    found_no = True
-                                    break
-                                elif i < max_retries - 1:
-                                    self.logger.info(f"第{i+1}次检查未发现NO持仓,等待1秒后重试...")
-                                    time.sleep(1)
-                                else:
-                                    self.logger.info("未发现NO持仓或检查完成,继续执行后续操作")
-                                    pass
-                            except Exception as e:
-                                self.logger.warning(f"第{i+1}次检查NO持仓时出错: {str(e)}")
-                                if i < max_retries - 1:
-                                    time.sleep(1)
-                                    continue
-                        
-                        if not found_no:
-                            self.logger.info("未发现NO持仓或检查完成,继续执行后续操作")
-                        
-                        # 重置所有价格
-                        for i in range(1,6):  # 1-5
-                            yes_entry = getattr(self, f'yes{i}_price_entry', None)
-                            no_entry = getattr(self, f'no{i}_price_entry', None)
-                            if yes_entry:
-                                yes_entry.delete(0, tk.END)
-                                yes_entry.insert(0, "0.00")
-                            if no_entry:
-                                no_entry.delete(0, tk.END)
-                                no_entry.insert(0, "0.00")
 
-                        # 在所有操作完成后,优雅退出并重启
-                        self.logger.info("准备重启程序...")
-                        self.root.after(5000, self.restart_program)  # 5秒后重启
+            if yes_price is None or no_price is None:
+                # 获取当前Yes价格
+                prices = self.driver.execute_script("""
+                    function getPrices() {
+                        const prices = {yes: null, no: null};
+                        const elements = document.getElementsByTagName('span');
                         
+                        for (let el of elements) {
+                            const text = el.textContent.trim();
+                            if (text.includes('Yes') && text.includes('¢')) {
+                                const match = text.match(/(\\d+\\.?\\d*)¢/);
+                                if (match) prices.yes = parseFloat(match[1]);
+                            }
+                            if (text.includes('No') && text.includes('¢')) {
+                                const match = text.match(/(\\d+\\.?\\d*)¢/);
+                                if (match) prices.no = parseFloat(match[1]);
+                            }
+                        }
+                        return prices;
+                    }
+                    return getPrices();
+                """)
+                    
+                if prices['yes'] is not None:
+                    yes_price = float(prices['yes']) / 100
+                    
+                    # 获取Yes5价格
+                    yes5_target = float(self.yes5_price_entry.get())
+                    
+                    # 检查Yes5价格匹配
+                    if 0 <= (yes_price - yes5_target) <= 0.05 and yes5_target > 0:
+                        self.logger.info("Yes 5价格匹配,执行自动卖出")
+                        
+                        # 执行卖出YES操作
+                        if self.only_sell_yes():
+                            self.logger.info("卖完 YES 后，检查是否需要卖出 NO")
+                            
+                            # 检查是否有NO持仓，最多检查3次
+                            max_retries = 2
+                            found_no = False
+                            
+                            for i in range(max_retries):
+                                try:
+                                    no_position = self.find_position_label_no()
+                                    if no_position == "No":
+                                        self.logger.info("发现NO持仓,执行卖出")
+                                        self.only_sell_no()
+                                        found_no = True
+                                        break
+                                    elif i < max_retries - 1:
+                                        self.logger.info(f"第{i+1}次检查未发现NO持仓,等待1秒后重试...")
+                                        time.sleep(1)
+                                    else:
+                                        self.logger.info("未发现NO持仓或检查完成,继续执行后续操作")
+                                        pass
+                                except Exception as e:
+                                    self.logger.warning(f"第{i+1}次检查NO持仓时出错: {str(e)}")
+                                    if i < max_retries - 1:
+                                        time.sleep(1)
+                                        continue
+                            
+                            if not found_no:
+                                self.logger.info("未发现NO持仓或检查完成,继续执行后续操作")
+                            
+                            # 重置所有价格
+                            for i in range(1,6):  # 1-5
+                                yes_entry = getattr(self, f'yes{i}_price_entry', None)
+                                no_entry = getattr(self, f'no{i}_price_entry', None)
+                                if yes_entry:
+                                    yes_entry.delete(0, tk.END)
+                                    yes_entry.insert(0, "0.00")
+                                if no_entry:
+                                    no_entry.delete(0, tk.END)
+                                    no_entry.insert(0, "0.00")
+
+                            # 在所有操作完成后,优雅退出并重启
+                            self.logger.info("准备重启程序...")
+                            self.root.after(5000, self.restart_program)  # 5秒后重启                 
         except Exception as e:
             self.logger.error(f"Sell_yes执行失败: {str(e)}")
             self.update_status(f"Sell_yes执行失败: {str(e)}")
-        
-
-    def Sell_no(self):
+        finally:
+            self.trading = False
+    def Sell_no(self,yes_price=None, no_price=None):
         """当NO价格等于实时No价格时自动卖出"""
         try:
             if not self.driver:
                 raise Exception("Sell_no浏览器连接丢失")   
             self.trading = True  # 开始交易
-            
-            # 获取当前No价格
-            prices = self.driver.execute_script("""
-                function getPrices() {
-                    const prices = {yes: null, no: null};
-                    const elements = document.getElementsByTagName('span');
-                    
-                    for (let el of elements) {
-                        const text = el.textContent.trim();
-                        if (text.includes('Yes') && text.includes('¢')) {
-                            const match = text.match(/(\\d+\\.?\\d*)¢/);
-                            if (match) prices.yes = parseFloat(match[1]);
-                        }
-                        if (text.includes('No') && text.includes('¢')) {
-                            const match = text.match(/(\\d+\\.?\\d*)¢/);
-                            if (match) prices.no = parseFloat(match[1]);
-                        }
-                    }
-                    return prices;
-                }
-                return getPrices();
-            """)
-                
-            if prices['no'] is not None:
-                no_price = float(prices['no']) / 100
-                
-                # 获取No5价格
-                no5_target = float(self.no5_price_entry.get())
-                
-                # 检查No5价格匹配
-                if 0 <= (no_price - no5_target) <= 0.05 and no5_target > 0:
-                    self.logger.info("No 5价格匹配,执行自动卖出")
-                    
-                    # 执行卖出NO操作
-                    if self.only_sell_no():
-                        self.logger.info("卖完 NO 后，检查是否需要卖出 YES")
-                        
-                        # 检查是否有YES持仓，最多检查3次
-                        max_retries = 2
-                        found_yes = False
-                        
-                        for i in range(max_retries):
-                            try:
-                                yes_position = self.find_position_label_yes()
-                                if yes_position == "Yes":
-                                    self.logger.info("发现YES持仓,执行卖出")
-                                    self.only_sell_yes()
-                                    found_yes = True
-                                    break
-                                elif i < max_retries - 1:
-                                    self.logger.info(f"第{i+1}次检查未发现YES持仓,等待1秒后重试...")
-                                    time.sleep(1)
-                                else:
-                                    self.logger.info("未发现YES持仓或检查完成,继续执行后续操作")
-                                    pass
-                            except Exception as e:
-                                self.logger.warning(f"第{i+1}次检查YES持仓时出错: {str(e)}")
-                                if i < max_retries - 1:
-                                    time.sleep(1)
-                                    continue
-                        
-                        if not found_yes:
-                            self.logger.info("未发现YES持仓或检查完成,继续执行后续操作")
-                        
-                        # 重置所有价格
-                        for i in range(1,6):  # 1-5
-                            yes_entry = getattr(self, f'yes{i}_price_entry', None)
-                            no_entry = getattr(self, f'no{i}_price_entry', None)
-                            if yes_entry:
-                                yes_entry.delete(0, tk.END)
-                                yes_entry.insert(0, "0.00")
-                            if no_entry:
-                                no_entry.delete(0, tk.END)
-                                no_entry.insert(0, "0.00")
 
-                        # 在所有操作完成后,优雅退出并重启
-                        self.logger.info("准备重启程序...")
-                        self.root.after(5000, self.restart_program)  # 5秒后重启
+            if yes_price is None or no_price is None:
+                # 获取当前No价格
+                prices = self.driver.execute_script("""
+                    function getPrices() {
+                        const prices = {yes: null, no: null};
+                        const elements = document.getElementsByTagName('span');
                         
+                        for (let el of elements) {
+                            const text = el.textContent.trim();
+                            if (text.includes('Yes') && text.includes('¢')) {
+                                const match = text.match(/(\\d+\\.?\\d*)¢/);
+                                if (match) prices.yes = parseFloat(match[1]);
+                            }
+                            if (text.includes('No') && text.includes('¢')) {
+                                const match = text.match(/(\\d+\\.?\\d*)¢/);
+                                if (match) prices.no = parseFloat(match[1]);
+                            }
+                        }
+                        return prices;
+                    }
+                    return getPrices();
+                """)
+                    
+                if prices['no'] is not None:
+                    no_price = float(prices['no']) / 100
+                    
+                    # 获取No5价格
+                    no5_target = float(self.no5_price_entry.get())
+                    
+                    # 检查No5价格匹配
+                    if 0 <= (no_price - no5_target) <= 0.05 and no5_target > 0:
+                        self.logger.info("No 5价格匹配,执行自动卖出")
+                        
+                        # 执行卖出NO操作
+                        if self.only_sell_no():
+                            self.logger.info("卖完 NO 后，检查是否需要卖出 YES")
+                            
+                            # 检查是否有YES持仓，最多检查3次
+                            max_retries = 2
+                            found_yes = False
+                            
+                            for i in range(max_retries):
+                                try:
+                                    yes_position = self.find_position_label_yes()
+                                    if yes_position == "Yes":
+                                        self.logger.info("发现YES持仓,执行卖出")
+                                        self.only_sell_yes()
+                                        found_yes = True
+                                        break
+                                    elif i < max_retries - 1:
+                                        self.logger.info(f"第{i+1}次检查未发现YES持仓,等待1秒后重试...")
+                                        time.sleep(1)
+                                    else:
+                                        self.logger.info("未发现YES持仓或检查完成,继续执行后续操作")
+                                        pass
+                                except Exception as e:
+                                    self.logger.warning(f"第{i+1}次检查YES持仓时出错: {str(e)}")
+                                    if i < max_retries - 1:
+                                        time.sleep(1)
+                                        continue
+                            
+                            if not found_yes:
+                                self.logger.info("未发现YES持仓或检查完成,继续执行后续操作")
+                            
+                            # 重置所有价格
+                            for i in range(1,6):  # 1-5
+                                yes_entry = getattr(self, f'yes{i}_price_entry', None)
+                                no_entry = getattr(self, f'no{i}_price_entry', None)
+                                if yes_entry:
+                                    yes_entry.delete(0, tk.END)
+                                    yes_entry.insert(0, "0.00")
+                                if no_entry:
+                                    no_entry.delete(0, tk.END)
+                                    no_entry.insert(0, "0.00")
+
+                            # 在所有操作完成后,优雅退出并重启
+                            self.logger.info("准备重启程序...")
+                            self.root.after(5000, self.restart_program)  # 5秒后重启              
         except Exception as e:
             self.logger.error(f"Sell_no执行失败: {str(e)}")
             self.update_status(f"Sell_no执行失败: {str(e)}")
-        
+        finally:
+            self.trading = False
     """以上代码是交易主体函数 1-4,从第 1570 行到第 2283行"""
 
     """以下代码是交易过程中的各种方法函数，涉及到按钮的点击，从第 2285 行到第 2651 行"""
@@ -3458,12 +3654,25 @@ class CryptoTrader:
         self.logger.info("进入自动找54币模式")
         # 确保有停止标志
         self.stop_auto_find = False
+        self.auto_find_running = True  # 添加运行状态标志
 
-        while not self.stop_auto_find and self.running:
+        # 使用非阻塞方式检查重启状态
+        def check_restart_and_continue():
             if self.check_restart():
-                time.sleep(600)
-                self.logger.info("等待10分钟后重试")
+                self.logger.info("检测到重启模式,等待10分钟后重试")
+                # 使用after代替sleep，避免阻塞
+                self.root.after(600000, continue_auto_find)
+                return False
+            return True
+         # 主要找币逻辑
+        def continue_auto_find():
+            if self.stop_auto_find or not self.running:
+                self.auto_find_running = False
+                self.logger.info("auto_find_54_coin已停止")
+                return
 
+            if not check_restart_and_continue():
+                return
             if not self.is_position_yes_or_no():
                 try:
                     # 停止URL监控
@@ -3474,157 +3683,186 @@ class CryptoTrader:
                     # 检查是否被要求停止
                     if self.stop_auto_find:
                         self.logger.info("检测到停止标志,auto_find_54_coin线程退出")
-                        break
+                        return
 
                     if self.is_auto_find_54_coin_time():# 判断是否处于自动找币时段
-                            self.logger.info("开始循环找币!")
-                        
-                            # 找币 函数
-                            def find_54_coin():
-                                try:
-                                    # 保存原始窗口句柄，确保在整个过程中有一个稳定的引用
-                                    original_window = self.driver.current_window_handle
-                                    
-                                    # 设置搜索关键词
-                                    coins = [
-                                        'BTC',
-                                        'ETH',
-                                        'SOLANA',
-                                        'XRP',
-                                        'DOGE'
-                                    ]
-                                    
-                                    for coin in coins:
-                                        try:  # 为每个币种添加单独的异常处理
-                                            coin_new_weekly_url = self.find_new_weekly_url(coin)
-                                            
-                                            if coin_new_weekly_url:
-                                                # 确保我们从原始窗口开始
-                                                try:
-                                                    self.driver.switch_to.window(original_window)
-                                                except Exception as e:
-                                                    self.logger.error(f"切换到原始窗口失败: {str(e)}")
-                                                    # 如果原始窗口不可用，可能需要重新创建一个窗口
-                                                    self.driver.switch_to.new_window('tab')
-                                                    original_window = self.driver.current_window_handle
-                                                
-                                                # 打开新标签页
-                                                self.driver.switch_to.new_window('tab')
-                                                self.driver.get(coin_new_weekly_url)
-
-                                                # 等待页面加载完成
-                                                WebDriverWait(self.driver, 20).until(
-                                                    EC.presence_of_element_located((By.TAG_NAME, "body"))
-                                                )
-                                                time.sleep(3)  # 等待页面渲染完成
-                                                
-                                                # 获取Yes和No的价格
-                                                prices = self.driver.execute_script("""
-                                                    function getPrices() {
-                                                        const prices = {yes: null, no: null};
-                                                        const elements = document.getElementsByTagName('span');
-                                                        
-                                                        for (let el of elements) {
-                                                            const text = el.textContent.trim();
-                                                            if (text.includes('Yes') && text.includes('¢')) {
-                                                                const match = text.match(/(\\d+\\.?\\d*)¢/);
-                                                                if (match) prices.yes = parseFloat(match[1]);
-                                                            }
-                                                            if (text.includes('No') && text.includes('¢')) {
-                                                                const match = text.match(/(\\d+\\.?\\d*)¢/);
-                                                                if (match) prices.no = parseFloat(match[1]);
-                                                            }
-                                                        }
-                                                        return prices;
-                                                    }
-                                                    return getPrices();
-                                                """)
-
-                                                if prices['yes'] is not None and prices['no'] is not None:
-                                                    yes_price = float(prices['yes'])
-                                                    no_price = float(prices['no'])
-
-                                                # 判断 YES 和 NO 价格是否在 48-56 之间
-                                                if (44 <= yes_price <= 56 or 44 <= no_price <= 56):
-                                                    # 保存当前 URL 到 config
-                                                    self.config['website']['url'] = coin_new_weekly_url
-                                                    self.save_config()
-                                                    self.logger.info(f"{coin}: YES{int(yes_price)}¢|NO{int(no_price)}¢ 符合要求,已保存到 config")
-                                                    # 关闭当前页面
-                                                    self.driver.close()
-                                                    # 切换回原始窗口
-                                                    self.driver.switch_to.window(original_window)
-                                                    # 重启程序
-                                                    self.restart_program()
-                                                else:
-                                                    self.logger.info(f"{coin}: YES{int(yes_price)}¢|NO{int(no_price)}¢❌ 不符合要求")
-                                                    # 关闭当前页面
-                                                    self.driver.close()
-                                                    # 切换回原始窗口
-                                                    self.driver.switch_to.window(original_window)
-                                                    
-                                            else:
-                                                self.logger.warning(f"未找到{coin}的周合约URL")
-                                        except Exception as e:
-                                            self.logger.error(f"处理{coin}时出错: {str(e)}")
-                                            # 尝试恢复到原始窗口并继续下一个币种
-                                            try:
-                                                # 确保我们关闭了所有可能打开的新标签页
-                                                current_handles = self.driver.window_handles
-                                                for handle in current_handles:
-                                                    if handle != original_window:
-                                                        self.driver.switch_to.window(handle)
-                                                        self.driver.close()
-                                                # 切换回原始窗口
-                                                self.driver.switch_to.window(original_window)
-                                            except Exception as inner_e:
-                                                self.logger.error(f"恢复窗口时出错: {str(inner_e)}")
-                                                # 如果无法恢复，可能需要重新创建浏览器会话
-                                                self._start_browser_monitoring(self.target_url)
-                                                break  # 中断循环，避免继续出错
-
-                                except Exception as e:
-                                    self.logger.error(f"自动找币异常: {str(e)}")
-                                    # 尝试重新初始化浏览器
-                                    try:
-                                        self._start_browser_monitoring(self.target_url)
-                                    except Exception as browser_e:
-                                        self.logger.error(f"重新初始化浏览器失败: {str(browser_e)}")
+                        self.logger.info("开始循环找币!")
+                        # 启动找币线程，不使用join阻塞
+                        find_thread = threading.Thread(target=find_54_coin, daemon=True)
+                        find_thread.start()
+                        # 使用定时器检查找币线程是否完成
+                        def check_find_thread():
+                            if not find_thread.is_alive():
+                                # 找币完成，恢复监控
+                                if not self.stop_auto_find and not self.is_url_monitoring:
+                                    self.logger.info("✅ 找币完成,已恢复URL监控")
+                                    self.start_url_monitoring()
+                                    self.refresh_page()
+                                # 安排下一次找币
+                                schedule_next_find()
+                            else:
+                                # 线程仍在运行，继续检查
+                                self.root.after(5000, check_find_thread)
+                        # 启动线程检查
+                        self.root.after(5000, check_find_thread)
                     else:
                         self.logger.debug("当前不在自动找币时段")
-
-                    # 使用独立线程执行找币
-                    find_thread = threading.Thread(target=find_54_coin)
-                    find_thread.start()
-                    find_thread.join()  # 最多等待60秒
-
+                        # 恢复监控并安排下一次找币
+                        if not self.is_url_monitoring:
+                            self.start_url_monitoring()
+                            self.refresh_page()
+                        self.schedule_next_find()
                 except Exception as e:
                     self.logger.error(f"自动找币异常: {str(e)}")
-                finally:
-                    # 只有在没有被要求停止时才恢复监控
+                    # 恢复监控并安排下一次找币
                     if not self.stop_auto_find and not self.is_url_monitoring:
-                        self.logger.info("✅ 找币完成,已恢复URL监控")
                         self.start_url_monitoring()
-                        self.refresh_page()               
+                        self.refresh_page()
+                    self.schedule_next_find()         
             else:
                 self.logger.info("当前持仓，停止找币")
-            # 定期检查停止标志
-            if self.stop_auto_find:
-                self.logger.info("检测到停止标志,auto_find_54_coin线程退出")
-                break
+                self.schedule_next_find()
+        # 保存continue_auto_find引用，以便在其他地方使用
+        self.continue_auto_find = continue_auto_find
+        # 开始执行
+        continue_auto_find()
+    # 安排下一次找币
+    def schedule_next_find(self):
+        if self.stop_auto_find or not self.running:
+            self.auto_find_running = False
+            self.logger.info("auto_find_54_coin已停止")
+            return
+            
+        self.logger.info("安排10分钟后再次执行找币")
+        # 使用after代替sleep，避免阻塞
+        if hasattr(self, 'continue_auto_find') and self.continue_auto_find:
+            self.auto_find_timer = self.root.after(600000, self.continue_auto_find)  # 10分钟 = 600000毫秒
+        else:
+            self.logger.error("continue_auto_find未定义,无法安排下一次找币")
+            # 尝试重新启动自动找币
+            self.auto_find_running = False
+            self.root.after(600000, self.auto_find_54_coin)
 
-            # 等待10分钟后再次执行找币
-            self.logger.info("等待10分钟后重复找币")
-            for i in range(10):
+    def find_54_coin(self):
+        try:
+            # 保存原始窗口句柄，确保在整个过程中有一个稳定的引用
+            original_window = self.driver.current_window_handle
+            # 设置搜索关键词
+            coins = [
+                'BTC',
+                'ETH',
+                'SOLANA',
+                'XRP',
+                'DOGE'
+            ]
+            for coin in coins:
                 if self.stop_auto_find:
-                    self.logger.info("等待过程中检测到停止标志，取消等待")
+                    self.logger.info("找币过程中检测到停止标志，中断操作")
                     break
-                time.sleep(30)  # 每分钟检查一次停止标志
-                if i < 9 and not self.stop_auto_find:  # 避免最后一次不必要的日志
-                    self.logger.debug(f"找币等待中: {i+1}/10 分钟")
 
-            time.sleep(1)  # 避免CPU过载
+                try:  # 为每个币种添加单独的异常处理
+                    coin_new_weekly_url = self.find_new_weekly_url(coin)
+                    
+                    if coin_new_weekly_url:
+                        # 确保我们从原始窗口开始
+                        try:
+                            self.driver.switch_to.window(original_window)
+                        except Exception as e:
+                            self.logger.error(f"切换到原始窗口失败: {str(e)}")
+                            # 如果原始窗口不可用，可能需要重新创建一个窗口
+                            self.driver.switch_to.new_window('tab')
+                            original_window = self.driver.current_window_handle
+                        
+                        # 打开新标签页
+                        self.driver.switch_to.new_window('tab')
+                        self.driver.get(coin_new_weekly_url)
 
+                        # 等待页面加载完成 - 使用显式等待代替time.sleep
+                        try:
+                            WebDriverWait(self.driver, 20).until(
+                                EC.presence_of_element_located((By.TAG_NAME, "body"))
+                            )
+                            # 使用短暂等待代替长时间sleep
+                            for _ in range(30):  # 分成30次小等待，每次0.1秒
+                                if self.stop_auto_find:
+                                    break
+                                time.sleep(0.1)
+                        except Exception as e:
+                            self.logger.error(f"等待页面加载失败: {str(e)}")
+                        
+                        # 获取Yes和No的价格
+                        prices = self.driver.execute_script("""
+                            function getPrices() {
+                                const prices = {yes: null, no: null};
+                                const elements = document.getElementsByTagName('span');
+                                
+                                for (let el of elements) {
+                                    const text = el.textContent.trim();
+                                    if (text.includes('Yes') && text.includes('¢')) {
+                                        const match = text.match(/(\\d+\\.?\\d*)¢/);
+                                        if (match) prices.yes = parseFloat(match[1]);
+                                    }
+                                    if (text.includes('No') && text.includes('¢')) {
+                                        const match = text.match(/(\\d+\\.?\\d*)¢/);
+                                        if (match) prices.no = parseFloat(match[1]);
+                                    }
+                                }
+                                return prices;
+                            }
+                            return getPrices();
+                        """)
+
+                        if prices['yes'] is not None and prices['no'] is not None:
+                            yes_price = float(prices['yes'])
+                            no_price = float(prices['no'])
+
+                        # 判断 YES 和 NO 价格是否在 48-56 之间
+                        if (44 <= yes_price <= 56 or 44 <= no_price <= 56):
+                            # 保存当前 URL 到 config
+                            self.config['website']['url'] = coin_new_weekly_url
+                            self.save_config()
+                            self.logger.info(f"{coin}: YES{int(yes_price)}¢|NO{int(no_price)}¢✅ 符合要求,已保存到 config")
+                            # 关闭当前页面
+                            self.driver.close()
+                            # 切换回原始窗口
+                            self.driver.switch_to.window(original_window)
+                            # 重启程序
+                            self.restart_program()
+                            return
+                        else:
+                            self.logger.info(f"{coin}: YES{int(yes_price)}¢|NO{int(no_price)}¢❌ 不符合要求")
+                            # 关闭当前页面
+                            self.driver.close()
+                            # 切换回原始窗口
+                            self.driver.switch_to.window(original_window)       
+                    else:
+                        self.logger.warning(f"未找到{coin}的周合约URL")
+                except Exception as e:
+                    self.logger.error(f"处理{coin}时出错: {str(e)}")
+                    # 尝试恢复到原始窗口并继续下一个币种
+                    try:
+                        # 确保我们关闭了所有可能打开的新标签页
+                        current_handles = self.driver.window_handles
+                        for handle in current_handles:
+                            if handle != original_window:
+                                self.driver.switch_to.window(handle)
+                                self.driver.close()
+                        # 切换回原始窗口
+                        self.driver.switch_to.window(original_window)
+                    except Exception as inner_e:
+                        self.logger.error(f"恢复窗口时出错: {str(inner_e)}")
+                        # 如果无法恢复，可能需要重新创建浏览器会话
+                        self._start_browser_monitoring(self.target_url)
+                        break  # 中断循环，避免继续出错
+
+        except Exception as e:
+            self.logger.error(f"自动找币异常: {str(e)}")
+            # 尝试重新初始化浏览器
+            try:
+                self._start_browser_monitoring(self.target_url)
+            except Exception as browser_e:
+                self.logger.error(f"重新初始化浏览器失败: {str(browser_e)}")
+    
     def start_auto_find_54_coin(self):
         """启动自动寻找0.54币种线程"""
         if hasattr(self, 'auto_find_thread') and self.auto_find_thread is not None and self.auto_find_thread.is_alive():
@@ -3635,27 +3873,33 @@ class CryptoTrader:
         self.auto_find_thread = threading.Thread(target=self.auto_find_54_coin, daemon=True)
         self.auto_find_thread.start()
         self.logger.info("已启动auto_find_54_coin线程")
-        
+
     def stop_auto_find_54_coin(self):
         """停止自动寻找0.54币种线程"""
         if hasattr(self, 'auto_find_thread') and self.auto_find_thread is not None and self.auto_find_thread.is_alive():
             self.logger.info("正在停止auto_find_54_coin线程")
             self.stop_auto_find = True
             
+            # 取消所有待执行的定时器
+            if hasattr(self, 'auto_find_timer') and self.auto_find_timer:
+                self.root.after_cancel(self.auto_find_timer)
+                self.auto_find_timer = None
+
             # 增加更强的线程停止机制
             start_time = time.time()
             max_wait_time = 8  # 最多等待8秒
             
-            while self.auto_find_thread.is_alive() and time.time() - start_time < max_wait_time:
-                self.logger.info("等待auto_find_54_coin线程停止...")
-                time.sleep(1)
+            while hasattr(self, 'auto_find_running') and self.auto_find_running and time.time() - start_time < max_wait_time:
+                self.logger.info("等待auto_find_54_coin停止...")
+                time.sleep(0.5)  # 使用较短的等待时间
             
-            if self.auto_find_thread.is_alive():
-                self.logger.warning("auto_find_54_coin线程未能在10秒内停止")
+            if hasattr(self, 'auto_find_running') and self.auto_find_running:
+                self.logger.warning("auto_find_54_coin未能在8秒内停止")
+                self.auto_find_running = False  # 强制设置为已停止
             else:
-                self.logger.info("auto_find_54_coin线程已停止")
+                self.logger.info("auto_find_54_coin已停止")
         else:
-            self.logger.info("auto_find_54_coin线程未运行")
+            self.logger.info("auto_find_54_coin未运行")
 
     #-----------------以上是自动找 54 币的函数-----------------
     def _find_element_with_retry(self, xpaths, timeout=10, silent=False):
